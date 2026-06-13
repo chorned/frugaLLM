@@ -1,147 +1,118 @@
-# **🧠 Hermes Router Plugin**
+# **🧠 frugaLLM Proxy**
 
-A zero-dependency, cost-optimized LLM router proxy for [Hermes Agent](https://hermes-agent.nousresearch.com).
+**A zero-dependency, cost-optimized LLM router proxy for ANY app that supports custom OpenAI endpoints.**
 
-This plugin acts as a smart middleman between Hermes and OpenRouter. It automatically discovers the **best free models** available right now and routes your everyday requests to them, only escalating to a paid model when you explicitly tell it to.
+Whether you're using AI coding assistants like **Cursor**, **Cline**, or **Continue.dev**, or chat interfaces like **AnythingLLM**, **Obsidian plugins**, or **Hermes Agent**, frugaLLM acts as a smart middleman between your app and OpenRouter.
+
+It automatically discovers the **best free models** available right now and routes your everyday requests to them, only escalating to a paid premium model when you explicitly tell it to.
 
 ## **💸 The $11 Difference: Why use this?**
 
-If you load $11 into your OpenRouter account and point Hermes directly at a premium model, every single interaction costs you money. Trivial tasks like "fix this typo," "summarize this log," or "format this text" will eat away at your balance just as fast as complex coding problems.
+If you load $11 into your OpenRouter account and point your favorite AI tool directly at a premium model, every single interaction costs you money. Trivial tasks like "fix this typo," "write a git commit," or "format this JSON" will eat away at your balance just as fast as complex coding architecture problems.
 
-**The Hermes Router changes the game:**
+**frugaLLM changes the game:**
 
-* **Without the router:** Your $11 drains constantly. You hesitate to use Hermes for small tasks because of the micro-transactions.  
-* **With the router:** 95% of your daily requests hit high-quality, dynamically discovered *free* models (Tier 1). You pay **$0.00** for everyday tasks. That $11 balance is saved exclusively for the 5% of tasks that actually require heavy-duty reasoning (Tier 3). Your $11 can now last you months instead of days, and you never have to hesitate to ask Hermes a question.
+* **Without the router:** Your $11 drains constantly. You hesitate to ask your AI small questions because of the micro-transactions.  
+* **With the router:** 95% of your daily requests hit high-quality, dynamically discovered *free* models. You pay **$0.00** for everyday tasks. That $11 balance is saved exclusively for the 5% of tasks that actually require heavy-duty reasoning. Your $11 can now last you months instead of days.
 
-## **✨ Set It and Forget It**
+## **🗺️ How It Works: The Architecture**
 
-The best part? You don't have to manage model lists or hunt for promotions. At startup, the router automatically scans OpenRouter's /models endpoint and seamlessly updates its roster with the best free models available *that day*, sorted by context window.
+The router runs locally on your machine and pretends to be a standard OpenAI-compatible API. When your app sends a prompt, frugaLLM intercepts it and decides where it should *actually* go based on a simple 3-tier escalation path mapped to your agent types.
 
-You just chat with Hermes like normal. The routing happens entirely in the background.
+                     \[Your Favorite AI App\]  
+                  (Cursor, Cline, AnythingLLM)  
+                               │  
+                               ▼ (http://localhost:5050/v1)  
+                ╔══════════════════════════════╗  
+                ║       🧠 frugaLLM Proxy      ║  
+                ║    (Dynamic Model Router)    ║  
+                ╚══════════════════════════════╝  
+                 /             │             \\  
+           "balanced"      "reasoning"    "pro" or //escalate  
+        (Default Agents) (Expert Agents)    (Escalation)  
+               │               │               │  
+        ┌─────────────┐ ┌─────────────┐ ┌─────────────┐  
+        │ OpenRouter  │ │ OpenRouter  │ │ OpenRouter  │  
+        │ (Free Tier) │ │ (Free Tier) │ │ (Paid Tier) │  
+        │  owl-alpha  │ │ deepseek-r1 │ │ gemini-pro  │  
+        └─────────────┘ └─────────────┘ └─────────────┘  
+            $0.00           $0.00           $$$$$
 
-## **🚦 How It Works: The 3-Tier System**
-
-The router runs locally on localhost:5050. Hermes talks to it exactly like a standard API endpoint, and the router decides where the request goes based on a simple escalation path:
+### **🚦 The 3-Tier System**
 
 | Tier | Trigger | Model | Cost |
 | :---- | :---- | :---- | :---- |
-| **Tier 1: Daily Driver** | Every auto request | Best free general model (e.g., openrouter/owl-alpha) | **$0.00** |
-| **Tier 2: Deep Thinker** | Explicit model: reasoning\_free | Best free reasoning model (e.g., deepseek/deepseek-r1) | **$0.00** |
-| **Tier 3: The Big Guns** | Typing //escalate, 3 consecutive failures, or context overflow | Your configured premium model (e.g., gemini-3.1-pro-preview) | Paid |
+| **Tier 1: Balanced** | Every auto request (Default Agents) | Best free general model available today | **$0.00** |
+| **Tier 2: Reasoning** | Explicit model: reasoning\_free (Expert Agents) | Best free reasoning model available today | **$0.00** |
+| **Tier 3: The Big Guns** | Typing //escalate in the prompt, repeated failures, or massive context | Your configured premium model | Paid |
+
+**Set It and Forget It:** At startup, frugaLLM automatically scans OpenRouter's /models endpoint and seamlessly updates its roster with the best free models available *that day*, sorted by context window. You never have to hunt for promotions or manually update model lists.
 
 ## **🛠️ Requirements**
 
-* **macOS** (for the launchd background service — Linux users can easily adapt this to systemd)  
-* A Hermes Agent installation at \~/.hermes/  
-* Python 3.10+ with requests installed in your Hermes virtual environment  
+* Python 3.10+ (with the requests library installed)  
 * An OpenRouter API key (a free-tier account works perfectly\!)
 
-## **🚀 Easy 5-Step Installation**
+## **🚀 Easy Installation**
 
-### **1\. Copy the Script**
+### **1\. Download & Configure**
 
-Move the router script into your Hermes skills folder:
+Create a folder for the router anywhere on your machine (e.g., \~/frugaLLM), and place router\_server.py inside it.
 
-cp router\_server.py \~/.hermes/skills/router\_server.py
-
-### **2\. Add Your Key**
-
-Add your OpenRouter API key to your \~/.hermes/.env file:
+Create a .env file in the same folder and add your key:
 
 OPENROUTER\_API\_KEY=sk-or-your-key-here
 
-### **3\. Point Hermes to the Router**
+### **2\. Point Your App to the Router**
 
-Update your \~/.hermes/config.yaml to tell Hermes to use your new local proxy. This ensures you only pay for Tier 3 when you specifically ask for it:
+Go into the settings of Cursor, Cline, AnythingLLM, or whatever app you use, and set up a custom model provider:
 
-routing:  
-  allow\_pro: false   \# Only escalate if you type //escalate or on repeated failures
+* **Base URL / API URL:** http://localhost:5050/v1  
+* **API Key:** na (or anything, frugaLLM handles your real key securely)  
+* **Model Name:** auto
 
-model:  
-  api\_key: na  
-  base\_url: http://localhost:5050/v1  
-  default: auto  
-  provider: custom
+### **3\. Run It as a Background Service (The AI Way 🤖)**
 
-custom\_providers:  
-\- api\_key: na  
-  base\_url: http://localhost:5050/v1  
-  model: auto  
-  name: HermesRouter
+To make sure frugaLLM is always running without you having to keep a terminal window open, you'll want to run it as a background service.
 
-### **4\. Install as a Background Service (macOS)**
+**Don't know how to do that? Ask an AI\!**
 
-To make sure the router is always running without you having to think about it, we'll set it up as a launch agent.
+Simply copy the path to your router\_server.py file, open ChatGPT, Claude, or Gemini, and paste this prompt:
 
-First, edit com.hermes.router-proxy.plist to match your specific username:
+*"I am on \[macOS / Windows / Ubuntu\]. Please write me a \[launchd plist / systemd service / Windows Task Scheduler script\] that runs a Python script located at /path/to/your/frugaLLM/router\_server.py continuously in the background. Tell me exactly where to save it and the terminal commands to start it."*
 
-\<string\>/Users/YOUR\_USERNAME/.hermes/hermes-agent/venv/bin/python3\</string\>  
-\<string\>/Users/YOUR\_USERNAME/.hermes/skills/router\_server.py\</string\>
-
-Then, load the service:
-
-mkdir \-p \~/Library/LaunchAgents  
-cp com.hermes.router-proxy.plist \~/Library/LaunchAgents/  
-launchctl load \~/Library/LaunchAgents/com.hermes.router-proxy.plist
-
-*The proxy will now auto-start on login and restart automatically if it ever crashes.*
-
-### **5\. Verify It's Running**
-
-Run these quick checks to ensure everything is wired up:
-
-\# Check the service is alive in macOS  
-launchctl list | grep com.hermes.router-proxy
-
-\# Check the router's health endpoint  
-curl \-s http://localhost:5050/health | python3 \-m json.tool
-
-\# Watch the live logs to see the routing in action  
-tail \-f \~/.hermes/logs/router\_proxy.log
+Follow the AI's instructions, and you'll have a rock-solid background service running in two minutes.
 
 ## **💬 Usage**
 
-Once installed, there's nothing else you need to do\! Hermes will route your requests to Tier 1 automatically.
+Once installed, just use your app normally\! Set your app's model to auto and frugaLLM will handle the rest.
 
-If you want to manually force a specific tier during a conversation, you can use these model labels:
+If you want to manually force a specific tier during a chat or coding session, you can use these model names in your app's dropdown:
 
-| If you want... | Route to... |
+| If you want... | Set your app's model to... |
 | :---- | :---- |
 | **Normal tasks** | auto or balanced\_free (Tier 1\) |
 | **Complex logic** | reasoning\_free (Tier 2\) |
-| **Local privacy** | local (Routes to local Ollama via hermes:latest) |
-| **Max power** | pro or type //escalate in your chat message (Tier 3 paid model) |
+| **Max power** | pro or simply type //escalate anywhere in your prompt |
+
+💡 **Pro-Tip: Local LLMs**
+
+While frugaLLM dominates OpenRouter savings, it also fully supports routing to local instances via the local tag. If you have the hardware, downloading an app like Ollama is an incredibly easy, low-effort/high-reward way to add completely private, offline, 100% free routing to your stack\!
 
 ## **🎛️ Admin Commands**
 
-Want to manually poke the router? You can use these local endpoints:
+Want to manually poke the router while it's running in the background? Run these in your terminal:
 
 \# Force the router to re-scan OpenRouter for new free models right now  
 curl \-X POST http://localhost:5050/admin/refresh-models
 
-\# Reset the consecutive failure safety counter  
-curl \-X POST http://localhost:5050/admin/reset-failures
+\# View current router status and active model routing table  
+curl \-s http://localhost:5050/health | python3 \-m json.tool
 
-\# View current router status and active models  
-curl http://localhost:5050/health
+### **⏱️ Auto-Refresh Free Models (Zero Downtime)**
 
-## **📋 Logs**
+Because the OpenRouter free-tier directory changes constantly, you can keep frugaLLM perfectly up to date without *ever* restarting the app. Just set up a simple cron job to ping the refresh endpoint every 12 hours\!
 
-Keep an eye on what the router is doing (and how much time it's taking) in your logs:
+Open your crontab (crontab \-e) and add this line to silently refresh the roster every day at midnight and noon:
 
-\~/.hermes/logs/router\_proxy.log   \# Routing decisions and speed metrics  
-\~/.hermes/logs/router\_proxy.err   \# Error output
-
-**Example output:**
-
-10:27:11 \[Router\] ── Request: model=auto, msgs=2, stream=True  
-10:27:11 \[Router\] ☁️  auto → openrouter/owl-alpha \[Tier 1: default\]  
-10:27:11 \[Router\]    Resolved → openrouter/owl-alpha @ OPENROUTER (1.0ms routing)  
-10:27:29 \[Router\]    ✓ Done. Proxy overhead: 1.0ms | Upstream: 18040ms (18.0s)
-
-## **🗑️ Uninstall**
-
-If you ever need to remove the background service:
-
-launchctl unload \~/Library/LaunchAgents/com.hermes.router-proxy.plist  
-rm \~/Library/LaunchAgents/com.hermes.router-proxy.plist  
+0 0,12 \* \* \* curl \-X POST http://localhost:5050/admin/refresh-models \>/dev/null 2\>&1  
