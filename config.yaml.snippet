@@ -1,0 +1,23 @@
+# =============================================================================
+# Hermes Router Plugin — Config Snippet
+# =============================================================================
+# Add this block to your ~/.hermes/config.yaml to enable the router.
+# The routing section is read by router_server.py on every request.
+# =============================================================================
+
+routing:
+  allow_pro: false        # Set to true to enable Tier 3 escalation globally.
+                          # Tier 3 also triggers automatically on:
+                          #   - "//escalate" keyword in any message
+                          #   - 3 consecutive model failures
+
+model:
+  api_key: na             # The router handles auth internally
+  default: auto
+  provider: HermesRouter
+
+custom_providers:
+- api_key: na
+  base_url: http://localhost:5050/v1
+  model: auto
+  name: HermesRouter

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.llm.router-proxy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Zero-dependency architecture uses macOS system python directly -->
+        <string>/usr/bin/python3</string>
+        <string>/Users/YOUR_USERNAME/.llm-router/router_server.py</string>
+        <string>--port</string>
+        <string>5050</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/.llm-router</string>
+
+    <!-- Start automatically when user logs in -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process crashes -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Output to /tmp/ guarantees launchd won't crash due to missing log directories -->
+    <key>StandardOutPath</key>
+    <string>/tmp/llm-router.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/llm-router.err</string>
+
+    <!-- Prevent rapid restart loops on repeated crashes -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
