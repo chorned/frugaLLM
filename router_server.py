@@ -12,6 +12,7 @@ Features:
 - 3-Tier Dynamic Escalation Ladder (Flash-Lite -> Flash -> Pro)
 - Horizontal Model Rotation & Cooldown Tracking
 - Thought Signature & Anti-Hijack Middlewares
+- Native Reasoning Model Support (Intercepts and merges inner monologues)
 
 Run with the Hermes venv Python:
   ~/.hermes/hermes-agent/venv/bin/python3 ~/.hermes/skills/router_server.py
@@ -91,24 +92,44 @@ class ModelFailedError(Exception): pass
 class EscalateToLadderError(Exception): pass
 class ToolNotSupportedError(Exception): pass
 
-# ─── Dynamic Free Model Discovery (Non-Blocking) ─────────────────────────────
-# Initialize with safe fallbacks instantly so the server doesn't block port binding on boot
+# ─── Dynamic Free Model Discovery & Agnostic Logic ───────────────────────────
+# Initialize with the escalation ladder as instant safe fallbacks
 MODELS = {
-    "balanced_free": "google/gemini-2.5-flash:free",
-    "reasoning_free": "deepseek/deepseek-r1:free",
+    "balanced_free": ESCALATION_LADDER[0],
+    "reasoning_free": ESCALATION_LADDER[1],
     "pro_escalation": ESCALATION_LADDER[-1],
 }
 
+def _is_reasoning_model(model_data: dict) -> bool:
+    """Agnostic heuristic to detect reasoning models based on metadata."""
+    m_id = model_data.get("id", "").lower()
+    m_name = model_data.get("name", "").lower()
+    m_desc = model_data.get("description", "").lower()
+    
+    search_space = f"{m_id} {m_name} {m_desc}"
+    keywords = ["reasoning", "chain-of-thought", "-cot-", "thinker", "thought process"]
+    
+    # Check for direct heuristic keywords
+    if any(kw in search_space for kw in keywords):
+        return True
+    
+    # Generic matching for models that commonly include "think" or "reason" in the raw ID
+    if any(kw in m_id for kw in ("-reason", "think", "-o1", "-r1")):
+        return True
+        
+    return False
+
 def _background_model_fetch():
     """Runs in a daemon thread so the port opens instantly for clients."""
-    global MODELS
+    global MODELS, _FREE_MODEL_POOL
     fallbacks = {
-        "balanced_free": "google/gemini-2.5-flash:free",
-        "reasoning_free": "deepseek/deepseek-r1:free",
+        "balanced_free": ESCALATION_LADDER[0],
+        "reasoning_free": ESCALATION_LADDER[1],
         "pro_escalation": ESCALATION_LADDER[-1],
     }
+    
     try:
-        log.info("☀ Background Routine — scanning OpenRouter for free models...")
+        log.info("☀ Background Routine — scanning OpenRouter for the best free models...")
         req = urllib.request.Request(
             f"{OPENROUTER_BASE}/models",
             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"} if OPENROUTER_API_KEY else {}
@@ -124,25 +145,35 @@ def _background_model_fetch():
                     free.append(m)
             except (ValueError, TypeError): continue
 
+        # Sort all free models by context length to find the most capable
         free.sort(key=lambda x: x.get("context_length", 0), reverse=True)
         
         with STATE_LOCK:
-            global _FREE_MODEL_POOL
             _FREE_MODEL_POOL = free
 
             if free:
+                # Top model by context length automatically becomes balanced_free
                 fallbacks["balanced_free"] = free[0]["id"]
-                log.info(f"✓ balanced_free: {free[0]['id']} ({free[0].get('context_length', '?'):,} ctx)")
-                reasoning = [m for m in free if any(k in m["id"].lower() for k in ("deepseek", "r1", "reason", "think"))]
-                if reasoning:
-                    reasoning.sort(key=lambda x: x.get("context_length", 0), reverse=True)
-                    fallbacks["reasoning_free"] = reasoning[0]["id"]
-                    log.info(f"✓ reasoning_free: {reasoning[0]['id']}")
+                log.info(f"✓ balanced_free dynamically mapped to: {free[0]['id']} ({free[0].get('context_length', '?'):,} ctx)")
+                
+                # Agnostically search the pool for the best reasoning model
+                reasoning_models = [m for m in free if _is_reasoning_model(m)]
+                
+                if reasoning_models:
+                    # Sort reasoning models by context length
+                    reasoning_models.sort(key=lambda x: x.get("context_length", 0), reverse=True)
+                    fallbacks["reasoning_free"] = reasoning_models[0]["id"]
+                    log.info(f"✓ reasoning_free dynamically mapped to: {reasoning_models[0]['id']}")
+                else:
+                    log.info("ℹ No dedicated free reasoning model found. Falling back reasoning route to balanced pool.")
+                    fallbacks["reasoning_free"] = fallbacks["balanced_free"]
 
             MODELS.update(fallbacks)
+            
         log.info(f"Model roster locked. {len(ESCALATION_LADDER)} tiers in the Escalation Ladder.")
+        
     except Exception as e:
-        log.warning(f"Dynamic fetch failed, using fallbacks: {e}")
+        log.warning(f"Dynamic fetch failed, using internal fallbacks: {e}")
 
 # Kick off background fetch instantly
 threading.Thread(target=_background_model_fetch, daemon=True).start()
@@ -181,7 +212,10 @@ def get_next_model(current_model: str, reasoning_only: bool = False, requires_to
             m_id = m["id"]
             if m_id == current_model: continue
             if m_id in _COOLDOWNS and _COOLDOWNS[m_id] > now: continue
-            if reasoning_only and not any(kw in m_id.lower() for kw in ("deepseek", "r1", "reason", "think")): continue
+            
+            # Use the agnostic reasoning heuristic instead of hardcoded strings
+            if reasoning_only and not _is_reasoning_model(m): continue
+            
             if requires_tools and m_id in _TOOL_BLACKLIST and _TOOL_BLACKLIST[m_id] > now: continue 
             return m_id
         
@@ -256,15 +290,15 @@ def resolve_route(requested_model, messages, requires_tools=False):
         
     if _check_escalation(messages) or fails >= _FAILURE_THRESHOLD:
         log.info("🚀 Escalation triggered (Keyword or Failure loop). Jumping to ladder.")
-        return ESCALATION_LADDER[0], OPENROUTER_BASE, False
+        return ESCALATION_LADDER[0], OPENROUTER_BASE, False, False
 
     label = (requested_model or "auto").lower().strip()
 
     if label == "local":
-        return LOCAL_OLLAMA_MODEL, LOCAL_OLLAMA_BASE, True
+        return LOCAL_OLLAMA_MODEL, LOCAL_OLLAMA_BASE, True, False
         
     if label == "pro" or label == "escalate":
-        return ESCALATION_LADDER[0], OPENROUTER_BASE, False
+        return ESCALATION_LADDER[0], OPENROUTER_BASE, False, False
 
     if label in ("reasoning", "reasoning_free"):
         target = m_reasoning
@@ -272,7 +306,7 @@ def resolve_route(requested_model, messages, requires_tools=False):
             is_blacklisted = requires_tools and target in _TOOL_BLACKLIST and _TOOL_BLACKLIST[target] > now
         if is_blacklisted:
             target = get_next_model(target, reasoning_only=True, requires_tools=True)
-        return target or m_reasoning, OPENROUTER_BASE, False
+        return target or m_reasoning, OPENROUTER_BASE, False, True
         
     if label in ("auto", "balanced_free"):
         target = m_balanced
@@ -280,10 +314,10 @@ def resolve_route(requested_model, messages, requires_tools=False):
             is_blacklisted = requires_tools and target in _TOOL_BLACKLIST and _TOOL_BLACKLIST[target] > now
         if is_blacklisted:
             target = get_next_model(target, requires_tools=True)
-        return target or m_balanced, OPENROUTER_BASE, False
+        return target or m_balanced, OPENROUTER_BASE, False, False
 
     log.info(f"↗️  Passthrough target: {requested_model}")
-    return requested_model, OPENROUTER_BASE, False
+    return requested_model, OPENROUTER_BASE, False, False
 
 # ─── HTTP Proxy Handler ──────────────────────────────────────────────────────
 class RouterHandler(BaseHTTPRequestHandler):
@@ -364,7 +398,7 @@ class RouterHandler(BaseHTTPRequestHandler):
         is_streaming = data.get("stream", False)
         requires_tools = bool(data.get("tools"))
 
-        # ── Idea 1: Semantic Caching ──
+        # ── Semantic Caching ──
         cache_key = None
         if not is_streaming:
             cache_key = _get_cache_key(data)
@@ -382,7 +416,7 @@ class RouterHandler(BaseHTTPRequestHandler):
 
         # ── Execute Middlewares ──
         _enforce_anti_hijack(messages)
-        actual_model, backend_base, is_local = resolve_route(requested_model, messages, requires_tools)
+        actual_model, backend_base, is_local, is_reasoning_route = resolve_route(requested_model, messages, requires_tools)
 
         max_transitions = 8
         transitions = 0
@@ -427,8 +461,8 @@ class RouterHandler(BaseHTTPRequestHandler):
 
                     _COOLDOWNS[actual_model] = time.time() + cooldown
 
-                is_reasoning = any(kw in actual_model.lower() for kw in ("deepseek", "r1", "reason", "think"))
-                next_model = get_next_model(actual_model, reasoning_only=is_reasoning, requires_tools=requires_tools)
+                # Fallback to the next model dynamically
+                next_model = get_next_model(actual_model, reasoning_only=is_reasoning_route, requires_tools=requires_tools)
                 
                 if not next_model:
                     if actual_model in ESCALATION_LADDER:
@@ -469,6 +503,7 @@ class RouterHandler(BaseHTTPRequestHandler):
                 actual_model = ESCALATION_LADDER[0]
                 is_local = False
                 backend_base = OPENROUTER_BASE
+                is_reasoning_route = False # Reset flag for ladder 
                 log.info(f"🚀 TIER ESCALATION: Starting ladder at {actual_model}")
                 continue
 
@@ -511,7 +546,7 @@ class RouterHandler(BaseHTTPRequestHandler):
                 self._send_error(502, f"Router proxy error: {e}")
                 return
 
-        # If we exhausted all 8 transitions without successfully returning
+        # If we exhausted all transitions without successfully returning
         log.error("💥 Max transitions reached. Infinite loop aborted.")
         self._send_error(502, "Max internal routing transitions reached. High cluster instability.")
 
@@ -527,7 +562,7 @@ class RouterHandler(BaseHTTPRequestHandler):
             content = e.read() # Read payload exactly once
             resp_headers = e.headers
         except urllib.error.URLError as e:
-            # Let the URLError safely bubble up to trigger the Ollama/Cloud fallback!
+            # Let the URLError safely bubble up to trigger the Ollama/Cloud fallback
             raise e
 
         if status_code == 429:
@@ -556,13 +591,24 @@ class RouterHandler(BaseHTTPRequestHandler):
         _reset_failures()
         result = json.loads(content.decode("utf-8"))
         
+        # ── Reasoning Extractor Middleware (Sync) ──
         try:
             for choice in result.get("choices", []):
                 msg = choice.get("message", {})
+                
+                # Extract OpenRouter's internal reasoning payload
+                reasoning = msg.pop("reasoning", None)
+                if reasoning:
+                    original_content = msg.get("content") or ""
+                    # Splice the reasoning natively into the content via tags
+                    msg["content"] = f"<think>\n{reasoning}\n</think>\n\n{original_content}"
+                    log.info(f"🧠 Recovered {len(reasoning)} chars of hidden reasoning data.")
+                    
                 for tc in msg.get("tool_calls", []):
                     if "thought_signature" in tc or "thought_signature" in tc.get("function", {}):
                         log.info(f"📦 Model {model} returned a thought_signature.")
-        except Exception: pass
+        except Exception as e: 
+            log.warning(f"Failed parsing inner response schema: {e}")
             
         result["_hermes_route"] = f"{'local' if is_local else 'openrouter'}:{model}"
         
@@ -592,7 +638,6 @@ class RouterHandler(BaseHTTPRequestHandler):
             if e.code in (400, 404, 502, 503, 504) and not is_local:
                 body_lower = content.decode("utf-8", errors="ignore").lower()
                 
-                # Stream Tool Rejection
                 if e.code == 404 and bool(data.get("tools")):
                     raise ToolNotSupportedError(f"HTTP 404: Model likely lacks tool-capable endpoints.")
                 
@@ -608,7 +653,6 @@ class RouterHandler(BaseHTTPRequestHandler):
             self.wfile.write(content)
             return
         except urllib.error.URLError as e:
-            # Bubble up network disconnects to trigger the Ollama/Cloud fallback
             raise e
 
         _reset_failures()
@@ -618,7 +662,50 @@ class RouterHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hermes-Route", f"{'local' if is_local else 'openrouter'}:{model}")
         self.end_headers()
 
+        # ── Reasoning Extractor Middleware (Streaming) ──
+        is_thinking = False
+        
         for line in resp:
+            decoded = line.decode('utf-8')
+            
+            # Only intercept actual data SSE chunks
+            if decoded.startswith("data: ") and decoded.strip() != "data: [DONE]":
+                try:
+                    chunk = json.loads(decoded[6:])
+                    modified = False
+                    
+                    for choice in chunk.get("choices", []):
+                        delta = choice.get("delta", {})
+                        
+                        # Case 1: The model is actively streaming its reasoning scratchpad
+                        if "reasoning" in delta and delta["reasoning"] is not None:
+                            reasoning_text = delta.pop("reasoning")
+                            prefix = "<think>\n" if not is_thinking else ""
+                            is_thinking = True
+                            
+                            content = delta.get("content")
+                            # It is rare, but some models transition from reasoning to content in the same chunk
+                            if content is not None:
+                                delta["content"] = prefix + reasoning_text + "\n</think>\n\n" + content
+                                is_thinking = False
+                            else:
+                                delta["content"] = prefix + reasoning_text
+                            modified = True
+                            
+                        # Case 2: The model has finished thinking and is outputting normal content
+                        elif is_thinking and "content" in delta and delta["content"] is not None:
+                            delta["content"] = "\n</think>\n\n" + delta["content"]
+                            is_thinking = False
+                            modified = True
+
+                    # If we modified the payload, reconstruct the SSE event before sending
+                    if modified:
+                        line = f"data: {json.dumps(chunk)}\n".encode('utf-8')
+
+                except json.JSONDecodeError:
+                    pass # Let malformed/internal chunks pass through unharmed
+
+            # Pipe back to Hermes
             self.wfile.write(line)
             self.wfile.flush()
 
@@ -631,7 +718,7 @@ def main():
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║        HERMES ROUTER PROXY — Stateless & Self-Healing       ║
+║        HERMES ROUTER PROXY — Stateless & Self-Healing        ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Endpoint:  http://{args.host}:{args.port}/v1
 ║  Health:    http://{args.host}:{args.port}/health
@@ -641,7 +728,7 @@ def main():
 ║  Tier 3 (Ladder)    → {ESCALATION_LADDER[0]} (starts here)
 ╠══════════════════════════════════════════════════════════════╣
 ║  Cluster Size: {len(_FREE_MODEL_POOL)} free models available.
-║  Middlewares:  Threading, Anti-Hijack, Tool Filters, Cache
+║  Middlewares:  Reasoning Extraction, Anti-Hijack, Tool Cache
 ║  Waiting for requests...
 ╚══════════════════════════════════════════════════════════════╝
 """)
