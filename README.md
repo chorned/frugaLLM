@@ -1,118 +1,208 @@
-# **🧠 frugaLLM Proxy**
+<div align="center">
 
-**A zero-dependency, cost-optimized LLM router proxy for ANY app that supports custom OpenAI endpoints.**
+# 🪙 FrugaLLM 2.0
 
-Whether you're using AI coding assistants like **Cursor**, **Cline**, or **Continue.dev**, or chat interfaces like **AnythingLLM**, **Obsidian plugins**, or **Hermes Agent**, frugaLLM acts as a smart middleman between your app and OpenRouter.
+### Zero-Cost AI Routing with Automatic Free Model Discovery
 
-It automatically discovers the **best free models** available right now and routes your everyday requests to them, only escalating to a paid premium model when you explicitly tell it to.
+*A self-healing LLM proxy that automatically discovers and routes through the best available free models on OpenRouter, with local Ollama fallback, intelligent caching, and battle-tested middleware hooks.*
 
-## **💸 The $11 Difference: Why use this?**
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![LiteLLM](https://img.shields.io/badge/powered_by-LiteLLM-orange.svg)](https://github.com/BerriAI/litellm)
 
-If you load $11 into your OpenRouter account and point your favorite AI tool directly at a premium model, every single interaction costs you money. Trivial tasks like "fix this typo," "write a git commit," or "format this JSON" will eat away at your balance just as fast as complex coding architecture problems.
+</div>
 
-**frugaLLM changes the game:**
+---
 
-* **Without the router:** Your $11 drains constantly. You hesitate to ask your AI small questions because of the micro-transactions.  
-* **With the router:** 95% of your daily requests hit high-quality, dynamically discovered *free* models. You pay **$0.00** for everyday tasks. That $11 balance is saved exclusively for the 5% of tasks that actually require heavy-duty reasoning. Your $11 can now last you months instead of days.
+## ✨ What Is This?
 
-## **🗺️ How It Works: The Architecture**
+FrugaLLM is an OpenAI-compatible proxy that **routes your LLM traffic through the best available free models** — automatically. It sits between your application and the cloud, providing:
 
-The router runs locally on your machine and pretends to be a standard OpenAI-compatible API. When your app sends a prompt, frugaLLM intercepts it and decides where it should *actually* go based on a simple 3-tier escalation path mapped to your agent types.
+- 🆓 **Zero-Cost Inference** — Automatically discovers and rotates through free models on OpenRouter
+- 🔄 **Self-Healing Fallback Chains** — If a model goes down, the next one picks up instantly
+- 🧠 **Reasoning Model Detection** — Heuristically separates reasoning models from balanced ones
+- 🛡️ **Anti-Hijack Middleware** — Defeats upstream persona injection from free-tier model providers
+- 💾 **In-Memory Response Caching** — Identical prompts get instant responses
+- 📊 **Native Telemetry** — Langfuse, Prometheus, and PostgreSQL spend logging out of the box
+- 🏠 **Local Fallback** — Falls back to Ollama when all cloud models are exhausted
 
-                     \[Your Favorite AI App\]  
-                  (Cursor, Cline, AnythingLLM)  
-                               │  
-                               ▼ (http://localhost:5050/v1)  
-                ╔══════════════════════════════╗  
-                ║       🧠 frugaLLM Proxy      ║  
-                ║    (Dynamic Model Router)    ║  
-                ╚══════════════════════════════╝  
-                 /             │             \\  
-           "balanced"      "reasoning"    "pro" or //escalate  
-        (Default Agents) (Expert Agents)    (Escalation)  
-               │               │               │  
-        ┌─────────────┐ ┌─────────────┐ ┌─────────────┐  
-        │ OpenRouter  │ │ OpenRouter  │ │ OpenRouter  │  
-        │ (Free Tier) │ │ (Free Tier) │ │ (Paid Tier) │  
-        │  owl-alpha  │ │ deepseek-r1 │ │ gemini-pro  │  
-        └─────────────┘ └─────────────┘ └─────────────┘  
-            $0.00           $0.00           $$$$$
+## 🏗️ Architecture
 
-### **🚦 The 3-Tier System**
+![FrugaLLM 2.0 Architecture](docs/architecture.png)
 
-| Tier | Trigger | Model | Cost |
-| :---- | :---- | :---- | :---- |
-| **Tier 1: Balanced** | Every auto request (Default Agents) | Best free general model available today | **$0.00** |
-| **Tier 2: Reasoning** | Explicit model: reasoning\_free (Expert Agents) | Best free reasoning model available today | **$0.00** |
-| **Tier 3: The Big Guns** | Typing //escalate in the prompt, repeated failures, or massive context | Your configured premium model | Paid |
+## 🚀 Quickstart
 
-**Set It and Forget It:** At startup, frugaLLM automatically scans OpenRouter's /models endpoint and seamlessly updates its roster with the best free models available *that day*, sorted by context window. You never have to hunt for promotions or manually update model lists.
+### Option 1: Manual Setup
 
-## **🛠️ Requirements**
+```bash
+# 1. Clone the repo
+git clone https://github.com/YOUR_USERNAME/FrugaLLM-2.0.git
+cd FrugaLLM-2.0
 
-* Python 3.10+ (with the requests library installed)  
-* An OpenRouter API key (a free-tier account works perfectly\!)
+# 2. Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
 
-## **🚀 Easy Installation**
+# 3. Install dependencies
+pip install -r requirements.txt
 
-### **1\. Download & Configure**
+# 4. Configure your API keys
+cp .env.example .env
+# Edit .env and add your OPENROUTER_API_KEY
 
-Create a folder for the router anywhere on your machine (e.g., \~/frugaLLM), and place router\_server.py inside it.
+# 5. Start the proxy
+make start
 
-Create a .env file in the same folder and add your key:
+# 6. In a separate terminal, start the sidecar
+make sidecar
+```
 
-OPENROUTER\_API\_KEY=sk-or-your-key-here
+### Option 2: Docker Compose
 
-### **2\. Point Your App to the Router**
+```bash
+# 1. Clone and configure
+git clone https://github.com/YOUR_USERNAME/FrugaLLM-2.0.git
+cd FrugaLLM-2.0
+cp .env.example .env
+# Edit .env and add your OPENROUTER_API_KEY
 
-Go into the settings of Cursor, Cline, AnythingLLM, or whatever app you use, and set up a custom model provider:
+# 2. Start everything
+docker compose up -d
 
-* **Base URL / API URL:** http://localhost:5050/v1  
-* **API Key:** na (or anything, frugaLLM handles your real key securely)  
-* **Model Name:** auto
+# 3. With PostgreSQL spend logging:
+docker compose --profile full up -d
+```
 
-### **3\. Run It as a Background Service (The AI Way 🤖)**
+### Option 3: macOS LaunchAgent (Always-On)
 
-To make sure frugaLLM is always running without you having to keep a terminal window open, you'll want to run it as a background service.
+```bash
+# 1. Edit the plist files to set your paths
+vim services/com.frugallm.proxy.plist
+vim services/com.frugallm.sidecar.plist
 
-**Don't know how to do that? Ask an AI\!**
+# 2. Install and load
+cp services/com.frugallm.*.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.frugallm.proxy.plist
+launchctl load ~/Library/LaunchAgents/com.frugallm.sidecar.plist
+```
 
-Simply copy the path to your router\_server.py file, open ChatGPT, Claude, or Gemini, and paste this prompt:
+## 🔧 Usage
 
-*"I am on \[macOS / Windows / Ubuntu\]. Please write me a \[launchd plist / systemd service / Windows Task Scheduler script\] that runs a Python script located at /path/to/your/frugaLLM/router\_server.py continuously in the background. Tell me exactly where to save it and the terminal commands to start it."*
+### As an OpenAI-Compatible Endpoint
 
-Follow the AI's instructions, and you'll have a rock-solid background service running in two minutes.
+FrugaLLM exposes a standard OpenAI-compatible API on `http://localhost:4000`:
 
-## **💬 Usage**
+```python
+from openai import OpenAI
 
-Once installed, just use your app normally\! Set your app's model to auto and frugaLLM will handle the rest.
+client = OpenAI(
+    base_url="http://localhost:4000/v1",
+    api_key="sk-frugallm-master"  # Your configured master key
+)
 
-If you want to manually force a specific tier during a chat or coding session, you can use these model names in your app's dropdown:
+# Use the "auto" model for automatic free model routing
+response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Explain quantum computing"}]
+)
+print(response.choices[0].message.content)
+```
 
-| If you want... | Set your app's model to... |
-| :---- | :---- |
-| **Normal tasks** | auto or balanced\_free (Tier 1\) |
-| **Complex logic** | reasoning\_free (Tier 2\) |
-| **Max power** | pro or simply type //escalate anywhere in your prompt |
+### Model Aliases
 
-💡 **Pro-Tip: Local LLMs**
+| Alias | Behavior |
+|-------|----------|
+| `auto` | Routes to the best available free balanced model |
+| `reasoning` | Routes to the best available free reasoning model |
+| `local` | Forces local Ollama execution (no cloud fallback) |
+| `pro` | Escalates to paid tier (if configured) |
+| Any model ID | Passthrough to the specific model |
 
-While frugaLLM dominates OpenRouter savings, it also fully supports routing to local instances via the local tag. If you have the hardware, downloading an app like Ollama is an incredibly easy, low-effort/high-reward way to add completely private, offline, 100% free routing to your stack\!
+### CLI Tool
 
-## **🎛️ Admin Commands**
+```bash
+# Quick query
+python -m frugallm.router_cli "What is the meaning of life?"
 
-Want to manually poke the router while it's running in the background? Run these in your terminal:
+# Pipe from stdin
+echo "Explain DNS" | python -m frugallm.router_cli --stdin
 
-\# Force the router to re-scan OpenRouter for new free models right now  
-curl \-X POST http://localhost:5050/admin/refresh-models
+# Force reasoning model
+python -m frugallm.router_cli -p engineer "Review this code..."
 
-\# View current router status and active model routing table  
-curl \-s http://localhost:5050/health | python3 \-m json.tool
+# Check gateway health
+python -m frugallm.router_cli --models
+```
 
-### **⏱️ Auto-Refresh Free Models (Zero Downtime)**
+## 🛡️ Middleware Hooks
 
-Because the OpenRouter free-tier directory changes constantly, you can keep frugaLLM perfectly up to date without *ever* restarting the app. Just set up a simple cron job to ping the refresh endpoint every 12 hours\!
+FrugaLLM includes three battle-tested middleware hooks that run on every request:
 
-Open your crontab (crontab \-e) and add this line to silently refresh the roster every day at midnight and noon:
+### 1. Anti-Hijack Injection
+Many free-tier models on OpenRouter inject hidden system prompts (e.g., "You are OWL", "ZOO company"). This middleware appends a recency-bias exploit to your system message to ensure **your** persona always wins.
 
-0 0,12 \* \* \* curl \-X POST http://localhost:5050/admin/refresh-models \>/dev/null 2\>&1  
+### 2. Gemini Thought Signatures
+Gemini models require a `thought_signature` field on tool calls. If absent, the API returns a 400 error. This middleware ensures the field is always present, mocking it when necessary.
+
+### 3. Reasoning Extractor
+OpenRouter and OpenAI-compatible endpoints sometimes return reasoning in hidden fields (`reasoning`, `reasoning_content`). This middleware surfaces them properly so your application can display or log the model's chain-of-thought.
+
+## 📁 Project Structure
+
+```
+FrugaLLM-2.0/
+├── config/
+│   ├── litellm_config.yaml        # Main LiteLLM proxy configuration
+│   └── dynamic_models.yaml        # Auto-generated by the sidecar
+├── frugallm/
+│   ├── __init__.py
+│   ├── custom_callbacks.py        # Middleware hooks (anti-hijack, thought sigs, reasoning)
+│   ├── dynamic_roster_sidecar.py  # Free model discovery daemon
+│   └── router_cli.py             # CLI wrapper
+├── legacy/
+│   └── router_server.py          # Original monolithic server (reference only)
+├── services/
+│   ├── com.frugallm.proxy.plist   # macOS LaunchAgent for the proxy
+│   └── com.frugallm.sidecar.plist # macOS LaunchAgent for the sidecar
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── CONFIGURATION.md
+│   └── TROUBLESHOOTING.md
+├── .env.example                   # Environment variable template
+├── docker-compose.yml             # Docker deployment
+├── Makefile                       # Convenience commands
+└── requirements.txt               # Python dependencies
+```
+
+## ⚙️ Configuration
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
+
+### Key Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | ✅ | — | Your OpenRouter API key |
+| `FRUGALLM_MASTER_KEY` | — | `sk-frugallm-master` | Proxy authentication key |
+| `FRUGALLM_PROXY_PORT` | — | `4000` | LiteLLM proxy port |
+| `FRUGALLM_POLL_INTERVAL` | — | `300` | Sidecar poll interval (seconds) |
+| `FRUGALLM_LOCAL_MODEL` | — | `llama3.2:latest` | Local Ollama model |
+| `FRUGALLM_LOCAL_URL` | — | `http://127.0.0.1:11434` | Ollama base URL |
+
+## 📊 Telemetry
+
+FrugaLLM supports native telemetry through LiteLLM:
+
+- **Langfuse** — Full request/response tracing with cost tracking
+- **Prometheus** — Metrics endpoint for Grafana dashboards
+- **PostgreSQL** — Spend logging for cost analytics
+
+Enable by uncommenting the relevant sections in `config/litellm_config.yaml` and setting the required environment variables.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or PR.
+
+## 📜 License
+
+[MIT](LICENSE)
