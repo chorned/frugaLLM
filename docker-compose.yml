@@ -1,0 +1,80 @@
+# FrugaLLM 2.0 — Docker Compose Stack
+# Starts the LiteLLM proxy, sidecar, and optional PostgreSQL for spend logging.
+#
+# Usage:
+#   cp .env.example .env   # Fill in your API keys
+#   docker compose up -d   # Start the stack
+#   docker compose logs -f # Watch logs
+
+services:
+  # ── LiteLLM Proxy ────────────────────────────────────────────────────────
+  proxy:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: frugallm-proxy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./frugallm:/app/frugallm:ro
+    env_file:
+      - .env
+    environment:
+      - LITELLM_CONFIG_FILE=/app/config/litellm_config.yaml
+    command: >
+      --config /app/config/litellm_config.yaml
+      --port 4000
+      --num_workers 2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+
+  # ── Dynamic Roster Sidecar ──────────────────────────────────────────────
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar
+    container_name: frugallm-sidecar
+    volumes:
+      - ./config:/app/config
+      - ./frugallm:/app/frugallm:ro
+    env_file:
+      - .env
+    environment:
+      - FRUGALLM_CONFIG_DIR=/app/config
+      - FRUGALLM_PROXY_PORT=4000
+    restart: unless-stopped
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+  # ── PostgreSQL (Optional: Spend Logging) ────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: frugallm-db
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm_secret
+      POSTGRES_DB: litellm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - full  # Only start with: docker compose --profile full up
+
+volumes:
+  pgdata:

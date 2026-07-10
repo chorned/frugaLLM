@@ -1,0 +1,12 @@
+# FrugaLLM 2.0 — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core: LiteLLM proxy server
+litellm[proxy]>=1.40.0
+
+# Optional: Langfuse telemetry
+# langfuse>=2.0.0
+
+# Optional: PostgreSQL spend logging (requires DATABASE_URL)
+# prisma>=0.13.0
+# asyncpg>=0.29.0

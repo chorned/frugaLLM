@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-Hermes Router Proxy — Zero-Dependency OpenAI-Compatible Proxy
-==============================================================
+FrugaLLM Legacy Router Server — Zero-Dependency OpenAI-Compatible Proxy
+========================================================================
+
+LEGACY REFERENCE — This is the original monolithic router server that was
+replaced by the LiteLLM-based architecture. It is included for historical
+reference and as a fallback for environments where LiteLLM cannot be used.
 
 Uses ONLY Python stdlib for the HTTP server.
-Features: 
+
+Features:
 - Multi-Threaded Concurrency (Prevents Blocking/Connection Errors)
 - Stateless Routing (Profile Agnostic)
 - 0ms In-Memory Bounded Response Caching
@@ -14,8 +19,8 @@ Features:
 - Thought Signature & Anti-Hijack Middlewares
 - Native Reasoning Model Support (Intercepts and merges inner monologues)
 
-Run with the Hermes venv Python:
-  ~/.hermes/hermes-agent/venv/bin/python3 ~/.hermes/skills/router_server.py
+Run standalone:
+  python legacy/router_server.py --port 5050
 """
 
 from __future__ import annotations
@@ -44,8 +49,7 @@ except ImportError:
     from http.server import BaseHTTPRequestHandler
 
 # ─── Paths & Environment ──────────────────────────────────────────────────────
-_HERMES_DIR = Path.home() / ".hermes"
-_ENV_PATH = _HERMES_DIR / ".env"
+_ENV_PATH = Path(".env")
 
 def _load_env():
     if not _ENV_PATH.exists(): return
@@ -62,19 +66,19 @@ _load_env()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
-LOCAL_OLLAMA_BASE = "http://127.0.0.1:11434"
-LOCAL_OLLAMA_MODEL = "hermes:latest"
-PROXY_PORT = 5050
+LOCAL_OLLAMA_BASE = os.getenv("FRUGALLM_LOCAL_URL", "http://127.0.0.1:11434")
+LOCAL_OLLAMA_MODEL = os.getenv("FRUGALLM_LOCAL_MODEL", "llama3.2:latest")
+PROXY_PORT = int(os.getenv("FRUGALLM_PROXY_PORT", "5050"))
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [Router] %(message)s", datefmt="%H:%M:%S")
-log = logging.getLogger("hermes-router")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [FrugaLLM] %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger("frugallm-router")
 
 # ─── Thread-Safe Routing State & Cache ────────────────────────────────────────
 STATE_LOCK = threading.RLock()
 
-_FREE_MODEL_POOL = []  
-_COOLDOWNS = {}        
+_FREE_MODEL_POOL = []
+_COOLDOWNS = {}
 _TOOL_BLACKLIST = {}    # Dict mapping model_id -> expiry timestamp (5 min cooldown)
 _CACHE = {}             # In-memory response cache
 CACHE_TTL = 300         # Cache duration in seconds
@@ -93,7 +97,6 @@ class EscalateToLadderError(Exception): pass
 class ToolNotSupportedError(Exception): pass
 
 # ─── Dynamic Free Model Discovery & Agnostic Logic ───────────────────────────
-# Initialize with the escalation ladder as instant safe fallbacks
 MODELS = {
     "balanced_free": ESCALATION_LADDER[0],
     "reasoning_free": ESCALATION_LADDER[1],
@@ -105,18 +108,16 @@ def _is_reasoning_model(model_data: dict) -> bool:
     m_id = model_data.get("id", "").lower()
     m_name = model_data.get("name", "").lower()
     m_desc = model_data.get("description", "").lower()
-    
+
     search_space = f"{m_id} {m_name} {m_desc}"
     keywords = ["reasoning", "chain-of-thought", "-cot-", "thinker", "thought process"]
-    
-    # Check for direct heuristic keywords
+
     if any(kw in search_space for kw in keywords):
         return True
-    
-    # Generic matching for models that commonly include "think" or "reason" in the raw ID
+
     if any(kw in m_id for kw in ("-reason", "think", "-o1", "-r1")):
         return True
-        
+
     return False
 
 def _background_model_fetch():
@@ -127,7 +128,7 @@ def _background_model_fetch():
         "reasoning_free": ESCALATION_LADDER[1],
         "pro_escalation": ESCALATION_LADDER[-1],
     }
-    
+
     try:
         log.info("☀ Background Routine — scanning OpenRouter for the best free models...")
         req = urllib.request.Request(
@@ -145,22 +146,18 @@ def _background_model_fetch():
                     free.append(m)
             except (ValueError, TypeError): continue
 
-        # Sort all free models by context length to find the most capable
         free.sort(key=lambda x: x.get("context_length", 0), reverse=True)
-        
+
         with STATE_LOCK:
             _FREE_MODEL_POOL = free
 
             if free:
-                # Top model by context length automatically becomes balanced_free
                 fallbacks["balanced_free"] = free[0]["id"]
                 log.info(f"✓ balanced_free dynamically mapped to: {free[0]['id']} ({free[0].get('context_length', '?'):,} ctx)")
-                
-                # Agnostically search the pool for the best reasoning model
+
                 reasoning_models = [m for m in free if _is_reasoning_model(m)]
-                
+
                 if reasoning_models:
-                    # Sort reasoning models by context length
                     reasoning_models.sort(key=lambda x: x.get("context_length", 0), reverse=True)
                     fallbacks["reasoning_free"] = reasoning_models[0]["id"]
                     log.info(f"✓ reasoning_free dynamically mapped to: {reasoning_models[0]['id']}")
@@ -169,14 +166,21 @@ def _background_model_fetch():
                     fallbacks["reasoning_free"] = fallbacks["balanced_free"]
 
             MODELS.update(fallbacks)
-            
+
         log.info(f"Model roster locked. {len(ESCALATION_LADDER)} tiers in the Escalation Ladder.")
-        
+
     except Exception as e:
         log.warning(f"Dynamic fetch failed, using internal fallbacks: {e}")
 
-# Kick off background fetch instantly
-threading.Thread(target=_background_model_fetch, daemon=True).start()
+FETCH_EVENT = threading.Event()
+
+def _model_fetch_loop():
+    while True:
+        _background_model_fetch()
+        FETCH_EVENT.wait(300)
+        FETCH_EVENT.clear()
+
+threading.Thread(target=_model_fetch_loop, daemon=True).start()
 
 def _get_cache_key(data: dict) -> str:
     """Create a deterministic hash of the request prompt and tools."""
@@ -195,14 +199,13 @@ def get_next_model(current_model: str, reasoning_only: bool = False, requires_to
         return None
 
     now = time.time()
-    
+
     with STATE_LOCK:
-        # Housekeeping: clear expired limits
         for k in list(_COOLDOWNS.keys()):
             if _COOLDOWNS[k] < now:
                 del _COOLDOWNS[k]
                 log.info(f"♻️ Model {k} rate-limit cooldown expired.")
-                
+
         for k in list(_TOOL_BLACKLIST.keys()):
             if _TOOL_BLACKLIST[k] < now:
                 del _TOOL_BLACKLIST[k]
@@ -212,13 +215,10 @@ def get_next_model(current_model: str, reasoning_only: bool = False, requires_to
             m_id = m["id"]
             if m_id == current_model: continue
             if m_id in _COOLDOWNS and _COOLDOWNS[m_id] > now: continue
-            
-            # Use the agnostic reasoning heuristic instead of hardcoded strings
             if reasoning_only and not _is_reasoning_model(m): continue
-            
-            if requires_tools and m_id in _TOOL_BLACKLIST and _TOOL_BLACKLIST[m_id] > now: continue 
+            if requires_tools and m_id in _TOOL_BLACKLIST and _TOOL_BLACKLIST[m_id] > now: continue
             return m_id
-        
+
     return None
 
 # ─── Middlewares ─────────────────────────────────────────────────────────────
@@ -250,14 +250,14 @@ def _enforce_gemini_thought_signatures(messages: list, target_model: str) -> tup
                     func["thought_signature"] = sig
                     signatures_found += 1
                 elif is_gemini:
-                    dummy_sig = tc.get("id", "router_mocked_signature")
+                    dummy_sig = tc.get("id", "frugallm_mocked_signature")
                     tc["thought_signature"] = dummy_sig
                     func["thought_signature"] = dummy_sig
                     signatures_injected += 1
     return signatures_found, signatures_injected
 
 # ─── Escalation Detection ────────────────────────────────────────────────────
-_ESCALATION_KEYWORDS = ["//escalate", "hey hermes, use your pro brain"]
+_ESCALATION_KEYWORDS = ["//escalate", "use your pro brain"]
 _consecutive_failures = 0
 _FAILURE_THRESHOLD = 3
 
@@ -282,12 +282,12 @@ def _reset_failures():
 def resolve_route(requested_model, messages, requires_tools=False):
     """Makes routing decisions based PURELY on the requested API payload."""
     now = time.time()
-    
+
     with STATE_LOCK:
         fails = _consecutive_failures
         m_reasoning = MODELS.get("reasoning_free", ESCALATION_LADDER[-1])
         m_balanced = MODELS.get("balanced_free", ESCALATION_LADDER[-1])
-        
+
     if _check_escalation(messages) or fails >= _FAILURE_THRESHOLD:
         log.info("🚀 Escalation triggered (Keyword or Failure loop). Jumping to ladder.")
         return ESCALATION_LADDER[0], OPENROUTER_BASE, False, False
@@ -296,7 +296,7 @@ def resolve_route(requested_model, messages, requires_tools=False):
 
     if label == "local":
         return LOCAL_OLLAMA_MODEL, LOCAL_OLLAMA_BASE, True, False
-        
+
     if label == "pro" or label == "escalate":
         return ESCALATION_LADDER[0], OPENROUTER_BASE, False, False
 
@@ -305,9 +305,9 @@ def resolve_route(requested_model, messages, requires_tools=False):
         with STATE_LOCK:
             is_blacklisted = requires_tools and target in _TOOL_BLACKLIST and _TOOL_BLACKLIST[target] > now
         if is_blacklisted:
-            target = get_next_model(target, reasoning_only=True, requires_tools=True)
+            target = get_next_model(target, reasoning_only=True, requires_tools=requires_tools)
         return target or m_reasoning, OPENROUTER_BASE, False, True
-        
+
     if label in ("auto", "balanced_free"):
         target = m_balanced
         with STATE_LOCK:
@@ -341,7 +341,7 @@ class RouterHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path.rstrip("/")
-        
+
         with STATE_LOCK:
             cache_sz = len(_CACHE)
             fails = _consecutive_failures
@@ -351,7 +351,7 @@ class RouterHandler(BaseHTTPRequestHandler):
 
         if path == "/health":
             self._send_json({
-                "status": "ok", 
+                "status": "ok",
                 "models": current_models,
                 "escalation_ladder": ESCALATION_LADDER,
                 "cooldowns": cooldowns,
@@ -362,10 +362,10 @@ class RouterHandler(BaseHTTPRequestHandler):
         elif path == "/v1/models":
             now = int(time.time())
             self._send_json({"object": "list", "data": [
-                {"id": "auto", "object": "model", "created": now, "owned_by": "hermes-router"},
-                {"id": "reasoning", "object": "model", "created": now, "owned_by": "hermes-router"},
-                {"id": "pro", "object": "model", "created": now, "owned_by": "hermes-router"},
-                {"id": "local", "object": "model", "created": now, "owned_by": "hermes-router"},
+                {"id": "auto", "object": "model", "created": now, "owned_by": "frugallm-router"},
+                {"id": "reasoning", "object": "model", "created": now, "owned_by": "frugallm-router"},
+                {"id": "pro", "object": "model", "created": now, "owned_by": "frugallm-router"},
+                {"id": "local", "object": "model", "created": now, "owned_by": "frugallm-router"},
             ]})
         else:
             self._send_error(404, f"Unknown endpoint: {path}")
@@ -403,9 +403,8 @@ class RouterHandler(BaseHTTPRequestHandler):
         if not is_streaming:
             cache_key = _get_cache_key(data)
             now = time.time()
-            
+
             with STATE_LOCK:
-                # Clean expired cache
                 expired = [k for k, v in _CACHE.items() if v["expiry"] < now]
                 for k in expired: del _CACHE[k]
 
@@ -420,39 +419,40 @@ class RouterHandler(BaseHTTPRequestHandler):
 
         max_transitions = 8
         transitions = 0
-        failed_domains = set() # Protects against endless ping-pong timeouts
-        
+        failed_domains = set()
+
         while transitions < max_transitions:
             transitions += 1
-            
+
             found, injected = _enforce_gemini_thought_signatures(messages, actual_model)
             if injected > 0: log.info(f"🛡️ Middleware: Injected {injected} missing thought_signatures for {actual_model}.")
 
             target_url = f"{backend_base}/{'v1/' if is_local else ''}chat/completions"
             data["model"] = actual_model
-            
+
             headers = {"Content-Type": "application/json"}
             if not is_local:
                 headers["Authorization"] = f"Bearer {OPENROUTER_API_KEY}"
-                headers["HTTP-Referer"] = "https://hermes.local"
-                headers["X-Title"] = "Hermes Router"
+                headers["HTTP-Referer"] = "https://frugallm.local"
+                headers["X-Title"] = "FrugaLLM Router"
 
             log.info(f"── Request {transitions}/{max_transitions}: {actual_model} @ {'LOCAL' if is_local else 'CLOUD'} ──")
-            
+
             try:
                 if is_streaming:
                     self._proxy_streaming(target_url, data, headers, actual_model, is_local, messages)
                 else:
                     self._proxy_sync(target_url, data, headers, actual_model, is_local, messages, cache_key)
-                return 
+                return
 
             except (RateLimitExceeded, ModelFailedError, ToolNotSupportedError) as e:
                 with STATE_LOCK:
                     if isinstance(e, RateLimitExceeded):
                         cooldown = e.retry_after_seconds
                         log.warning(f"⏳ Rate limited on {actual_model}! Benched for {cooldown}s.")
+                        FETCH_EVENT.set()
                     elif isinstance(e, ToolNotSupportedError):
-                        cooldown = 300 # 5-minute penalty for tool failure
+                        cooldown = 300
                         log.warning(f"🚫 {e} Blacklisting {actual_model} for tool use for 5 mins.")
                         _TOOL_BLACKLIST[actual_model] = time.time() + cooldown
                     else:
@@ -461,9 +461,8 @@ class RouterHandler(BaseHTTPRequestHandler):
 
                     _COOLDOWNS[actual_model] = time.time() + cooldown
 
-                # Fallback to the next model dynamically
                 next_model = get_next_model(actual_model, reasoning_only=is_reasoning_route, requires_tools=requires_tools)
-                
+
                 if not next_model:
                     if actual_model in ESCALATION_LADDER:
                         log.error("💥 All models in the Escalation Ladder have failed!")
@@ -474,8 +473,8 @@ class RouterHandler(BaseHTTPRequestHandler):
                         if not is_local:
                             log.info("🔄 Falling back to LOCAL OLLAMA as last resort...")
                             actual_model = LOCAL_OLLAMA_MODEL
-                            is_local = True
                             backend_base = LOCAL_OLLAMA_BASE
+                            is_local = True
                             continue
                         else:
                             self._send_error(502, "Complete cluster exhaustion. Cloud dead and local offline.")
@@ -486,7 +485,7 @@ class RouterHandler(BaseHTTPRequestHandler):
 
             except EscalateToLadderError as e:
                 log.warning(f"📏 {e} — Escaping to Paid Escalation Ladder.")
-                
+
                 notice = "\n\n[SYSTEM: Task escalated to higher tier model. Proceed strictly as requested.]"
                 modified = []
                 sys_found = False
@@ -496,19 +495,18 @@ class RouterHandler(BaseHTTPRequestHandler):
                         sys_found = True
                     else: modified.append(msg)
                 if not sys_found: modified.insert(0, {"role": "system", "content": notice.strip()})
-                
+
                 messages = modified
                 data["messages"] = messages
-                
+
                 actual_model = ESCALATION_LADDER[0]
                 is_local = False
                 backend_base = OPENROUTER_BASE
-                is_reasoning_route = False # Reset flag for ladder 
+                is_reasoning_route = False
                 log.info(f"🚀 TIER ESCALATION: Starting ladder at {actual_model}")
                 continue
 
             except urllib.error.URLError as e:
-                # The UNMASKED Exception Block allows graceful ping-pong routing
                 if is_local:
                     failed_domains.add("local")
                     if "cloud" in failed_domains:
@@ -518,12 +516,12 @@ class RouterHandler(BaseHTTPRequestHandler):
 
                     log.warning(f"⚡ Ollama offline ({e.reason}) — checking for fallback cloud cluster.")
                     next_model = get_next_model(None, requires_tools=requires_tools)
-                    
+
                     if not next_model:
                         log.error("💥 Ping-Pong Loop prevented: Ollama offline and all cloud models exhausted.")
                         self._send_error(502, "Cluster exhaustion. Local instance offline and Cloud models in cooldown.")
                         return
-                        
+
                     actual_model = next_model
                     is_local = False
                     backend_base = OPENROUTER_BASE
@@ -540,13 +538,12 @@ class RouterHandler(BaseHTTPRequestHandler):
                     is_local = True
                     backend_base = LOCAL_OLLAMA_BASE
                     continue
-                    
+
             except Exception as e:
                 log.error(f"Proxy error: {e}")
                 self._send_error(502, f"Router proxy error: {e}")
                 return
 
-        # If we exhausted all transitions without successfully returning
         log.error("💥 Max transitions reached. Infinite loop aborted.")
         self._send_error(502, "Max internal routing transitions reached. High cluster instability.")
 
@@ -559,10 +556,9 @@ class RouterHandler(BaseHTTPRequestHandler):
                 resp_headers = resp.headers
         except urllib.error.HTTPError as e:
             status_code = e.code
-            content = e.read() # Read payload exactly once
+            content = e.read()
             resp_headers = e.headers
         except urllib.error.URLError as e:
-            # Let the URLError safely bubble up to trigger the Ollama/Cloud fallback
             raise e
 
         if status_code == 429:
@@ -571,15 +567,14 @@ class RouterHandler(BaseHTTPRequestHandler):
 
         if status_code in (400, 404, 502, 503, 504) and not is_local:
             body_lower = content.decode("utf-8", errors="ignore").lower()
-            
-            # Explicit Tool Rejection
+
             if status_code == 404 and bool(data.get("tools")):
                 raise ToolNotSupportedError(f"HTTP 404: Model likely lacks tool-capable endpoints.")
-                
+
             if status_code == 400 and any(kw in body_lower for kw in ("context", "too long", "token limit", "context_length")):
                 raise EscalateToLadderError(f"Context overflow on {model}")
             raise ModelFailedError(f"HTTP {status_code}: {body_lower[:150]}")
-            
+
         if status_code >= 400:
             _record_failure()
             self.send_response(status_code)
@@ -590,29 +585,25 @@ class RouterHandler(BaseHTTPRequestHandler):
 
         _reset_failures()
         result = json.loads(content.decode("utf-8"))
-        
+
         # ── Reasoning Extractor Middleware (Sync) ──
         try:
             for choice in result.get("choices", []):
                 msg = choice.get("message", {})
-                
-                # Extract OpenRouter's internal reasoning payload
                 reasoning = msg.pop("reasoning", None)
                 if reasoning:
                     original_content = msg.get("content") or ""
-                    # Splice the reasoning natively into the content via tags
                     msg["content"] = f"<think>\n{reasoning}\n</think>\n\n{original_content}"
                     log.info(f"🧠 Recovered {len(reasoning)} chars of hidden reasoning data.")
-                    
+
                 for tc in msg.get("tool_calls", []):
                     if "thought_signature" in tc or "thought_signature" in tc.get("function", {}):
                         log.info(f"📦 Model {model} returned a thought_signature.")
-        except Exception as e: 
+        except Exception as e:
             log.warning(f"Failed parsing inner response schema: {e}")
-            
-        result["_hermes_route"] = f"{'local' if is_local else 'openrouter'}:{model}"
-        
-        # Save successful response to Cache
+
+        result["_frugallm_route"] = f"{'local' if is_local else 'openrouter'}:{model}"
+
         if cache_key:
             with STATE_LOCK:
                 if len(_CACHE) >= MAX_CACHE_SIZE:
@@ -622,7 +613,7 @@ class RouterHandler(BaseHTTPRequestHandler):
                     "expiry": time.time() + CACHE_TTL,
                     "response": result
                 }
-            
+
         self._send_json(result)
 
     def _proxy_streaming(self, url, data, headers, model, is_local, messages):
@@ -630,20 +621,20 @@ class RouterHandler(BaseHTTPRequestHandler):
         try:
             resp = urllib.request.urlopen(req, timeout=300)
         except urllib.error.HTTPError as e:
-            content = e.read() # Read payload exactly once
+            content = e.read()
             if e.code == 429:
                 retry_after = int(e.headers.get("Retry-After", 60))
                 raise RateLimitExceeded(retry_after)
-                
+
             if e.code in (400, 404, 502, 503, 504) and not is_local:
                 body_lower = content.decode("utf-8", errors="ignore").lower()
-                
+
                 if e.code == 404 and bool(data.get("tools")):
                     raise ToolNotSupportedError(f"HTTP 404: Model likely lacks tool-capable endpoints.")
-                
+
                 if e.code == 400 and any(kw in body_lower for kw in ("context", "too long", "token limit", "context_length")):
                     raise EscalateToLadderError(f"Context overflow on {model}")
-                    
+
                 raise ModelFailedError(f"HTTP {e.code}: {body_lower[:150]}")
 
             _record_failure()
@@ -659,66 +650,60 @@ class RouterHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Hermes-Route", f"{'local' if is_local else 'openrouter'}:{model}")
+        self.send_header("X-FrugaLLM-Route", f"{'local' if is_local else 'openrouter'}:{model}")
         self.end_headers()
 
         # ── Reasoning Extractor Middleware (Streaming) ──
         is_thinking = False
-        
+
         for line in resp:
             decoded = line.decode('utf-8')
-            
-            # Only intercept actual data SSE chunks
+
             if decoded.startswith("data: ") and decoded.strip() != "data: [DONE]":
                 try:
                     chunk = json.loads(decoded[6:])
                     modified = False
-                    
+
                     for choice in chunk.get("choices", []):
                         delta = choice.get("delta", {})
-                        
-                        # Case 1: The model is actively streaming its reasoning scratchpad
+
                         if "reasoning" in delta and delta["reasoning"] is not None:
                             reasoning_text = delta.pop("reasoning")
                             prefix = "<think>\n" if not is_thinking else ""
                             is_thinking = True
-                            
+
                             content = delta.get("content")
-                            # It is rare, but some models transition from reasoning to content in the same chunk
                             if content is not None:
                                 delta["content"] = prefix + reasoning_text + "\n</think>\n\n" + content
                                 is_thinking = False
                             else:
                                 delta["content"] = prefix + reasoning_text
                             modified = True
-                            
-                        # Case 2: The model has finished thinking and is outputting normal content
+
                         elif is_thinking and "content" in delta and delta["content"] is not None:
                             delta["content"] = "\n</think>\n\n" + delta["content"]
                             is_thinking = False
                             modified = True
 
-                    # If we modified the payload, reconstruct the SSE event before sending
                     if modified:
                         line = f"data: {json.dumps(chunk)}\n".encode('utf-8')
 
                 except json.JSONDecodeError:
-                    pass # Let malformed/internal chunks pass through unharmed
+                    pass
 
-            # Pipe back to Hermes
             self.wfile.write(line)
             self.wfile.flush()
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Hermes Router Proxy")
+    parser = argparse.ArgumentParser(description="FrugaLLM Legacy Router Proxy")
     parser.add_argument("--port", "-p", type=int, default=PROXY_PORT)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║        HERMES ROUTER PROXY — Stateless & Self-Healing        ║
+║     FRUGALLM LEGACY ROUTER — Stateless & Self-Healing       ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Endpoint:  http://{args.host}:{args.port}/v1
 ║  Health:    http://{args.host}:{args.port}/health
@@ -733,7 +718,6 @@ def main():
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-    # Leverage the Multi-Threaded Server class initialized at the top!
     server = ServerClass((args.host, args.port), RouterHandler)
     try: server.serve_forever()
     except KeyboardInterrupt:

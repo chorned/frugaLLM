@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- FrugaLLM 2.0 — LiteLLM Proxy LaunchAgent -->
+<!-- Install: cp services/com.frugallm.proxy.plist ~/Library/LaunchAgents/ -->
+<!-- Load:    launchctl load ~/Library/LaunchAgents/com.frugallm.proxy.plist -->
+<!-- Unload:  launchctl unload ~/Library/LaunchAgents/com.frugallm.proxy.plist -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.frugallm.proxy</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- UPDATE THESE PATHS to match your Python venv and project location -->
+        <string>/usr/local/bin/python3</string>
+        <string>-m</string>
+        <string>litellm</string>
+        <string>--config</string>
+        <string>/path/to/FrugaLLM-2.0/config/litellm_config.yaml</string>
+        <string>--port</string>
+        <string>4000</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <!-- UPDATE THIS to your FrugaLLM-2.0 project directory -->
+    <string>/path/to/FrugaLLM-2.0</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/frugallm-proxy.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/frugallm-proxy.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
