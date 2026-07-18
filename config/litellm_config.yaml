@@ -1,104 +1,77 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# FrugaLLM 2.0 — LiteLLM Gateway Configuration
-# ═══════════════════════════════════════════════════════════════════════════════
-# Main configuration for the LiteLLM proxy. Static endpoints are defined here;
-# dynamic free models (free_balanced, free_reasoning) are injected by the
-# Dynamic Roster Sidecar via the included dynamic_models.yaml file.
-#
-# Start the proxy:
-#   litellm --config config/litellm_config.yaml --port 4000
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Include the auto-generated dynamic model roster
-include:
-  - dynamic_models.yaml
-
-model_list:
-  # ── Primary Routing Aliases ─────────────────────────────────────────────────
-
-  # "auto" — default catch-all route. Points to your primary local or cloud model.
-  # Customize the model, api_base, and api_key to match your setup.
-  - model_name: auto
-    litellm_params:
-      model: ollama/llama3.2:latest
-      api_base: http://127.0.0.1:11434
-      timeout: 60
-      max_retries: 2
-
-  # "reasoning" — route for complex reasoning tasks.
-  # Can point to the same model as auto, or a dedicated reasoning model.
-  - model_name: reasoning
-    litellm_params:
-      model: ollama/llama3.2:latest
-      api_base: http://127.0.0.1:11434
-      timeout: 60
-      max_retries: 2
-
-  # "local" — explicit local-only route (never falls back to cloud).
-  - model_name: local
-    litellm_params:
-      model: ollama/llama3.2:latest
-      api_base: http://127.0.0.1:11434
-      timeout: 60
-      max_retries: 0
-
-  # ── Optional: GPU Node ──────────────────────────────────────────────────────
-  # Uncomment and configure if you have a dedicated GPU node (e.g., via Tailscale).
-  #
-  # - model_name: gpu
-  #   litellm_params:
-  #     model: openai/your-model-name
-  #     api_base: http://YOUR_GPU_NODE_IP:8080/v1
-  #     api_key: "na"
-  #     timeout: 300
-  #     max_retries: 2
-
-  # ── Optional: Paid Fallback ─────────────────────────────────────────────────
-  # Uncomment to add a paid model as the ultimate fallback.
-  #
-  # - model_name: gemini-2.5-pro
-  #   litellm_params:
-  #     model: gemini/gemini-2.5-pro
-  #     api_key: os.environ/GEMINI_API_KEY
-  #     timeout: 300
-
-# ── Router Settings ──────────────────────────────────────────────────────────
-router_settings:
-  routing_strategy: simple-shuffle
-  num_retries: 2
-  timeout: 300
-  stream_timeout: 300
-  retry_after: 60
-  allowed_fails: 3
-
-# ── General Settings ─────────────────────────────────────────────────────────
 general_settings:
-  # Change this! Use a strong, unique key for production.
-  master_key: sk-frugallm-master
   alerting: []
-
-# ── LiteLLM Settings ────────────────────────────────────────────────────────
+  allow_client_side_credentials: true
+  master_key: sk-sidecar-1
+include:
+- dynamic_models.yaml
 litellm_settings:
-  # ── Telemetry Callbacks ──
-  # Uncomment the callbacks you want to enable.
-  # Langfuse requires LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-  # Prometheus requires a /metrics endpoint scraper
-  # success_callback: ["langfuse", "prometheus"]
-  # failure_callback: ["langfuse", "prometheus"]
-
-  # ── In-Memory Response Caching ──
+  additional_drop_params:
+  - provider
   cache: true
   cache_params:
-    type: local
     ttl: 300
-
-  # Drop unsupported params instead of erroring (important for local models)
+    type: local
+  callbacks: frugallm.custom_callbacks.hermes_proxy_handler
   drop_params: true
+  failure_callback:
+  - langfuse
+  - postgres
+  - prometheus
+  middleware:
+  - frugallm.gatekeeper.GatekeeperMiddleware
   set_verbose: true
-
-  # ── Custom Middleware Callbacks ──
-  # The FrugaLLM callbacks provide:
-  #   - Anti-hijack injection (defeats upstream persona hijacking)
-  #   - Gemini thought signature injection (prevents 400 errors)
-  #   - Reasoning content extraction (surfaces hidden reasoning fields)
-  callbacks: frugallm.custom_callbacks.frugallm_proxy_handler
+  success_callback:
+  - langfuse
+  - postgres
+  - prometheus
+model_list:
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+        preserve_thinking: false
+    max_retries: 2
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    stop:
+    - <turn|>
+    - </s>
+    - <eos>
+    stream_timeout: 300
+    timeout: 300
+  model_name: auto
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+        preserve_thinking: false
+    max_retries: 2
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    stop:
+    - <turn|>
+    - </s>
+    - <eos>
+    stream_timeout: 300
+    timeout: 300
+  model_name: reasoning
+- litellm_params:
+    api_base: http://127.0.0.1:11434
+    max_retries: 0
+    model: ollama/hermes:latest
+    timeout: 60
+  model_name: local
+- litellm_params:
+    api_key: os.environ/GEMINI_API_KEY
+    model: gemini/gemini-2.5-pro
+    timeout: 300
+  model_name: gemini-2.5-pro
+router_settings:
+  allowed_fails: 3
+  num_retries: 2
+  retry_after: 60
+  routing_strategy: simple-shuffle
+  stream_timeout: 300
+  timeout: 300

@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
 """
-FrugaLLM Dynamic Roster Sidecar
-=================================
+Hermes Dynamic Roster Sidecar
+==============================
 
 Lightweight daemon that polls OpenRouter for free models every 5 minutes
 and writes the best candidates to a YAML include file consumed by LiteLLM.
 
-Strategy: Write dynamic models to <config_dir>/dynamic_models.yaml which is
+Extracted from router_server.py:
+  - _is_reasoning_model()  (L103-120)
+  - _background_model_fetch() (L122-176)
+
+Strategy: Write dynamic models to ~/.hermes/dynamic_models.yaml which is
 included by the main litellm_config.yaml. After updating the file, send
-SIGHUP to LiteLLM to trigger a graceful config reload.
+SIGUSR1 to LiteLLM to trigger a graceful config reload.
 
-Usage:
-  python -m frugallm.dynamic_roster_sidecar
-
-Environment Variables:
-  FRUGALLM_CONFIG_DIR       Directory containing litellm_config.yaml (default: ./config)
-  OPENROUTER_API_KEY        OpenRouter API key for model inference
-  OPENROUTER_MANAGEMENT_KEY Separate key for polling the /models API (optional)
-  FRUGALLM_POLL_INTERVAL    Poll interval in seconds (default: 300)
-  FRUGALLM_PROXY_PORT       LiteLLM proxy port (default: 4000)
-  FRUGALLM_MASTER_KEY       LiteLLM master key (default: sk-frugallm-master)
-  FRUGALLM_LOCAL_MODEL      Local Ollama model name (default: llama3.2:latest)
-  FRUGALLM_LOCAL_URL        Local Ollama URL (default: http://127.0.0.1:11434)
-  FRUGALLM_GPU_MODEL        GPU node model path (default: none — disabled)
-  FRUGALLM_GPU_URL          GPU node base URL (default: none — disabled)
+Run as a launchd daemon:
+  ~/.hermes/venv_router/bin/python3 ~/.hermes/skills/dynamic_roster_sidecar.py
 """
 
 from __future__ import annotations
@@ -41,38 +33,29 @@ import urllib.request
 import urllib.error
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-_CONFIG_DIR = Path(os.getenv("FRUGALLM_CONFIG_DIR", "./config"))
-_DYNAMIC_MODELS_PATH = _CONFIG_DIR / "dynamic_models.yaml"
+import os
+_HERMES_DIR = Path(os.environ.get("FRUGALLM_CONFIG_DIR", Path.cwd() / "config"))
+_ENV_PATH = _HERMES_DIR / ".env"
+_DYNAMIC_MODELS_PATH = _HERMES_DIR / "dynamic_models.yaml"
+_LITELLM_PID_PATTERN = "litellm"
 
-POLL_INTERVAL = int(os.getenv("FRUGALLM_POLL_INTERVAL", "300"))
-PROXY_PORT = int(os.getenv("FRUGALLM_PROXY_PORT", "4000"))
-MASTER_KEY = os.getenv("FRUGALLM_MASTER_KEY", "sk-frugallm-master")
+POLL_INTERVAL = 300  # 5 minutes
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
-
-# Local fallback configuration
-LOCAL_MODEL = os.getenv("FRUGALLM_LOCAL_MODEL", "llama3.2:latest")
-LOCAL_URL = os.getenv("FRUGALLM_LOCAL_URL", "http://127.0.0.1:11434")
-
-# Optional GPU node configuration
-GPU_MODEL = os.getenv("FRUGALLM_GPU_MODEL", "")
-GPU_URL = os.getenv("FRUGALLM_GPU_URL", "")
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [FrugaLLM Sidecar] %(message)s",
+    format="%(asctime)s [Sidecar] %(message)s",
     datefmt="%H:%M:%S",
 )
-log = logging.getLogger("frugallm-roster-sidecar")
+log = logging.getLogger("hermes-roster-sidecar")
 
 # ─── Environment Loading ────────────────────────────────────────────────────
-def _load_env_file(env_path: Path | None = None):
-    """Load .env file into os.environ if it exists."""
-    if env_path is None:
-        env_path = Path(".env")
-    if not env_path.exists():
+def _load_env():
+    """Load .env file into os.environ (same pattern as router_server.py)."""
+    if not _ENV_PATH.exists():
         return
-    for line in env_path.read_text().splitlines():
+    for line in _ENV_PATH.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -87,7 +70,7 @@ def _load_env_file(env_path: Path | None = None):
             os.environ[k] = v
 
 
-_load_env_file()
+_load_env()
 
 # Use the dedicated management key if available, else fall back to inference key
 OPENROUTER_API_KEY = os.getenv(
@@ -102,15 +85,14 @@ _current_reasoning: list[str] | None = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Model Classification Logic
+# Extracted Logic from router_server.py (VERBATIM)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _is_reasoning_model(model_data: dict) -> bool:
     """
     Agnostic heuristic to detect reasoning models based on metadata.
 
-    Examines model ID, name, and description for reasoning-related keywords.
-    This allows automatic classification without maintaining a hardcoded list.
+    Extracted from router_server.py L103-120 (VERBATIM).
     """
     m_id = model_data.get("id", "").lower()
     m_name = model_data.get("name", "").lower()
@@ -137,16 +119,12 @@ def _is_reasoning_model(model_data: dict) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# YAML File Writer
+# YAML File Writer (replaces Management API)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> bool:
     """
     Write the dynamic model definitions to a YAML include file using fallback chaining.
-
-    Each model gets a numbered alias (free_balanced, free_balanced_2, etc.) with
-    a linear fallback chain. The last entry in each chain falls back to a local
-    backup model.
     """
     def _litellm_model(or_id: str) -> str:
         if or_id.startswith("openrouter/") or or_id.startswith("ollama/") or or_id.startswith("openai/"):
@@ -155,7 +133,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
 
     yaml_lines = [
         "# ═══════════════════════════════════════════════════════════════════════════════",
-        "# AUTO-GENERATED by FrugaLLM Dynamic Roster Sidecar — DO NOT EDIT MANUALLY",
+        "# AUTO-GENERATED by dynamic_roster_sidecar.py — DO NOT EDIT MANUALLY",
         f"# Last updated: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         "# ═══════════════════════════════════════════════════════════════════════════════",
         "",
@@ -163,9 +141,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     ]
 
     fallbacks = [
-        '    - {"auto": ["free_balanced"]}',
-        '    - {"reasoning": ["free_reasoning"]}',
-        '    - {"local": ["free_balanced"]}'
+        "    - {\"auto\": [\"free_balanced\"]}",
+        "    - {\"reasoning\": [\"free_reasoning\"]}",
+        "    - {\"local\": [\"free_balanced\"]}"
     ]
 
     # Generate Balanced Chain
@@ -183,16 +161,15 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         ])
         if i < len(balanced_ids) - 1:
             next_model = f"free_balanced_{i+2}"
-            fallbacks.append(f'    - {{"{model_name}": ["{next_model}"]}}')
+            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
         else:
-            fallbacks.append(f'    - {{"{model_name}": ["free_balanced_backup"]}}')
+            fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
 
-    # Balanced backup — local Ollama
     yaml_lines.extend([
         "  - model_name: free_balanced_backup",
         "    litellm_params:",
-        f"      model: ollama/{LOCAL_MODEL}",
-        f"      api_base: {LOCAL_URL}",
+        "      model: ollama/hermes:latest",
+        "      api_base: http://127.0.0.1:11434",
         "      timeout: 300",
         "      max_retries: 0",
         ""
@@ -213,32 +190,21 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         ])
         if i < len(reasoning_ids) - 1:
             next_model = f"free_reasoning_{i+2}"
-            fallbacks.append(f'    - {{"{model_name}": ["{next_model}"]}}')
+            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
         else:
-            fallbacks.append(f'    - {{"{model_name}": ["free_reasoning_backup"]}}')
+            fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
 
-    # Reasoning backup — GPU node if configured, otherwise local Ollama
-    if GPU_MODEL and GPU_URL:
-        yaml_lines.extend([
-            "  - model_name: free_reasoning_backup",
-            "    litellm_params:",
-            f"      model: openai/{GPU_MODEL}",
-            f"      api_base: {GPU_URL}",
-            '      api_key: "na"',
-            "      timeout: 300",
-            "      max_retries: 0",
-            ""
-        ])
-    else:
-        yaml_lines.extend([
-            "  - model_name: free_reasoning_backup",
-            "    litellm_params:",
-            f"      model: ollama/{LOCAL_MODEL}",
-            f"      api_base: {LOCAL_URL}",
-            "      timeout: 300",
-            "      max_retries: 0",
-            ""
-        ])
+    yaml_lines.extend([
+        "  - model_name: free_reasoning_backup",
+        "    litellm_params:",
+        "      model: openai//models/gemma-4-12b-it-Q5_K_M.gguf",
+        "      api_base: http://100.80.59.45:8080/v1",
+        "      api_key: \"na\"",
+        "      stop: [\"<turn|>\", \"<channel|>\", \"</s>\", \"<eos>\"]",
+        "      timeout: 300",
+        "      max_retries: 0",
+        ""
+    ])
 
     # Add router_settings fallbacks
     yaml_lines.extend([
@@ -265,22 +231,33 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
 def _restart_litellm():
     """
     Restart the LiteLLM proxy to pick up the new config include.
-    Uses SIGHUP for a zero-downtime config reload, falling back to process restart.
+    Uses SIGHUP for a zero-downtime config reload, falling back to launchctl.
     """
     try:
         if _signal_litellm():
             log.info("✓ LiteLLM config reloaded via SIGHUP.")
             return True
         else:
-            log.warning("SIGHUP failed — LiteLLM process not found. You may need to restart manually.")
-            return False
+            log.warning("SIGHUP failed, falling back to launchctl kickstart...")
+            result = subprocess.run(
+                ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.hermes.router-proxy"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                log.info("✓ LiteLLM proxy restart triggered via launchctl.")
+                return True
+            else:
+                log.error(f"launchctl kickstart returned {result.returncode}: {result.stderr.strip()}")
+                return False
     except Exception as e:
         log.error(f"Restart failed entirely: {e}")
         return False
 
 
 def _signal_litellm() -> bool:
-    """Find LiteLLM PID and send SIGHUP for graceful config reload."""
+    """Fallback: find LiteLLM PID and send SIGHUP."""
     try:
         result = subprocess.run(
             ["pgrep", "-f", "litellm.*--config"],
@@ -303,13 +280,16 @@ def _signal_litellm() -> bool:
 
 
 def _wait_for_litellm() -> bool:
-    """Wait for LiteLLM to become available (up to 300 seconds)."""
+    """Wait for LiteLLM to become available (up to 300 seconds).
+    Uses /v1/models instead of /health because /health probes all backends
+    (including unreachable ones like offline Qwen) causing long timeouts.
+    """
     log.info("⏳ Waiting for LiteLLM proxy to become available...")
     for attempt in range(60):
         try:
             req = urllib.request.Request(
-                f"http://127.0.0.1:{PROXY_PORT}/v1/models",
-                headers={"Authorization": f"Bearer {MASTER_KEY}"},
+                "http://127.0.0.1:5050/v1/models",
+                headers={"Authorization": "Bearer sk-sidecar-1"},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 if resp.status == 200:
@@ -319,12 +299,12 @@ def _wait_for_litellm() -> bool:
             pass
         time.sleep(5)
 
-    log.error("✗ LiteLLM proxy did not become available after 300s.")
+    log.error("✗ LiteLLM proxy did not become available after 90s.")
     return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Main Discovery Loop
+# Main Discovery Loop (adapted from _background_model_fetch)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def discover_and_register():
@@ -332,11 +312,7 @@ def discover_and_register():
     Polls OpenRouter for free models, classifies them, and writes the
     best ones to the dynamic_models.yaml include file.
 
-    Selection criteria:
-      - Must be free (prompt and completion cost = 0)
-      - Must support tool use
-      - Prefers models with >= 256k context window
-      - Separates balanced (general) from reasoning models using heuristics
+    Adapted from router_server.py L122-176.
     """
     global _current_balanced, _current_reasoning
 
@@ -364,7 +340,7 @@ def discover_and_register():
             params = m.get("supported_parameters", [])
             if "tools" not in params:
                 continue
-
+                
             p = m.get("pricing", {})
             try:
                 if (
@@ -383,7 +359,7 @@ def discover_and_register():
             free_balanced_models = [m for m in free if m.get("context_length", 0) >= 256000]
             if not free_balanced_models:
                 free_balanced_models = free  # Fallback to any context length if none >= 256k
-
+                
             best_balanced = [m["id"] for m in free_balanced_models]
             log.info(f"✓ free_balanced candidates: {len(best_balanced)} models")
 
@@ -429,14 +405,11 @@ def main():
     print(
         f"""
 ╔══════════════════════════════════════════════════════════════╗
-║     FRUGALLM DYNAMIC ROSTER SIDECAR                         ║
+║     HERMES DYNAMIC ROSTER SIDECAR                           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Config Target:   {_DYNAMIC_MODELS_PATH}
 ║  Poll Interval:   {POLL_INTERVAL}s ({POLL_INTERVAL // 60} minutes)
-║  Proxy Port:      {PROXY_PORT}
 ║  OpenRouter Key:  {'✓ Present' if OPENROUTER_API_KEY else '✗ MISSING'}
-║  Local Fallback:  {LOCAL_MODEL} @ {LOCAL_URL}
-║  GPU Node:        {GPU_URL or 'Not configured'}
 ║  Waiting for LiteLLM to come online...
 ╚══════════════════════════════════════════════════════════════╝
 """

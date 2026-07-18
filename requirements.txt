@@ -4,6 +4,9 @@
 # Core: LiteLLM proxy server
 litellm[proxy]>=1.40.0
 
+# Validation: Gatekeeper Tier 2 Schema Validation
+jsonschema>=4.20.0
+
 # Optional: Langfuse telemetry
 # langfuse>=2.0.0
 
