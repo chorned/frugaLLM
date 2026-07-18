@@ -8,7 +8,7 @@ litellm[proxy]>=1.40.0
 jsonschema>=4.20.0
 
 # Optional: Langfuse telemetry
-langfuse>=2.0.0
+langfuse==2.60.10
 
 # Optional: PostgreSQL spend logging (requires DATABASE_URL)
 prisma>=0.13.0
