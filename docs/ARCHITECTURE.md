@@ -1,48 +1,44 @@
-# FrugaLLM 2.0 — Architecture
+# FrugaLLM 3.0 — Architecture
 
 ## System Overview
 
-FrugaLLM is a **three-layer architecture** that sits between your applications and LLM providers:
+FrugaLLM 3.0 is a **containerized, microservice-based AI gateway stack** that sits between client applications (Hermes, AI Agents, CLI tools) and model backends:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        YOUR APPLICATIONS                        │
-│   (AI Agents, CLI Tools, Any OpenAI-Compatible Client)          │
+│   (AI Agents, Hermes, CLI Tools, Any OpenAI Client)             │
 └──────────────────────────────┬──────────────────────────────────┘
                                │ OpenAI API (POST /v1/chat/completions)
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     LAYER 1: LiteLLM PROXY                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │   Router      │  │  Middleware   │  │  Response Cache      │   │
-│  │   (Fallback   │  │  (Anti-Hijack │  │  (In-Memory, 5 min) │   │
-│  │    Chains)    │  │   Thought Sig │  │                      │   │
-│  │              │  │   Reasoning)  │  │                      │   │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘   │
-│                                                                  │
-│  Config: config/litellm_config.yaml + config/dynamic_models.yaml │
-│  Port:   4000 (configurable via FRUGALLM_PROXY_PORT)             │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                 LAYER 2: DYNAMIC ROSTER SIDECAR                 │
-│                                                                  │
-│  Polls OpenRouter /models API every 5 minutes.                   │
-│  Filters for: free pricing + tool support + 256k+ context.       │
-│  Classifies: balanced vs. reasoning (heuristic-based).           │
-│  Writes: config/dynamic_models.yaml with fallback chains.        │
-│  Signals: SIGHUP to LiteLLM for zero-downtime reload.           │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
+│              LAYER 1: GATEKEEPER GATEWAY (:5050)                │
+│  FastAPI Reverse Proxy & Internal Retry Engine                  │
+│                                                                 │
+│  - Intercepts chat completions & streams                       │
+│  - Validates output text for "empty promise" hallucinations     │
+│  - Manages internal retry loops + system reprimands             │
+└──────────────┬─────────────────────────────────┬────────────────┘
+               │ 1. Forward Request              │ 2. Check Text
+               ▼                                 ▼
+┌──────────────────────────────┐  ┌──────────────────────────────┐
+│   LAYER 2: LiteLLM ROUTER    │  │   LAYER 2: MICRO-CLASSIFIER  │
+│   (Internal Port :4000)      │  │   (Internal Port :8000)      │
+│                              │  │                              │
+│  - Dynamic Free Roster       │  │  - CPU ONNX Runtime          │
+│  - Fallback Chains           │  │  - DeBERTa-v3 NLI Neural Model│
+│  - Custom Callbacks          │  │  - Zero-shot Intent Detection│
+│  - Response Cache & DB Logging│ │                              │
+└──────────────┬───────────────┘  └──────────────────────────────┘
+               │
+               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    LAYER 3: MODEL BACKENDS                       │
-│                                                                  │
+│                                                                 │
 │  ┌────────────────┐  ┌────────────────┐  ┌──────────────────┐   │
 │  │  OpenRouter     │  │  Local Ollama   │  │  GPU Node        │   │
 │  │  (Free Models)  │  │  (Fallback)     │  │  (Optional)      │   │
-│  │                 │  │                 │  │                   │   │
+│  │                 │  │                 │  │                  │   │
 │  │  Balanced Chain │  │  llama3.2       │  │  Custom GGUF     │   │
 │  │  Reasoning Chain│  │  or any model   │  │  via Tailscale   │   │
 │  └────────────────┘  └────────────────┘  └──────────────────┘   │
@@ -51,60 +47,34 @@ FrugaLLM is a **three-layer architecture** that sits between your applications a
 
 ## Request Flow
 
-1. **Client** sends a standard OpenAI API request to `http://localhost:4000/v1/chat/completions`
-2. **LiteLLM Proxy** receives the request and applies middleware hooks:
-   - Anti-Hijack: Appends an override to the system message
-   - Gemini Thought Signatures: Ensures `thought_signature` fields are present
-3. **Router** resolves the model alias (`auto`, `reasoning`, `local`, etc.) to an actual model
-4. **Fallback Chain** executes: if the primary model fails, the next one in the chain is tried
-5. **Response** is returned to the client, with reasoning fields extracted and surfaced
+1. **Client** sends a standard OpenAI API request to `http://localhost:5050/v1/chat/completions` (the Gatekeeper entrypoint).
+2. **Gatekeeper Gateway** receives the request and forwards it to the internal LiteLLM Router (`litellm:4000`).
+3. **LiteLLM Router** applies low-level callback hooks (Anti-Hijack persona protection, Gemini thought signatures, reasoning extraction) and routes to OpenRouter or local backends via linear fallback chains.
+4. **Gatekeeper Inspection**:
+   - If response has structured `tool_calls` → passed through immediately.
+   - If response is text-only → sent to the **Micro-Classifier** (`classifier:8000`).
+5. **Auto-Retry Loop**: If the classifier detects an "empty promise" (intent to act without tool JSON), Gatekeeper injects a system reprimand and retries upstream internally up to `GATEKEEPER_MAX_RETRIES` times.
+6. **Response Delivery**: Validated response is returned to the client (re-wrapped as SSE stream chunks if streaming was requested).
 
-## Fallback Chain Design
-
-The sidecar generates a **linear fallback chain** for each model category:
-
-```
-auto → free_balanced → free_balanced_2 → ... → free_balanced_N → free_balanced_backup (Ollama)
-reasoning → free_reasoning → free_reasoning_2 → ... → free_reasoning_N → free_reasoning_backup
-```
-
-This means:
-- If `auto` fails → tries the first free balanced model
-- If that fails → tries the next one in the chain
-- If ALL cloud models fail → falls back to local Ollama
-- The chain is rebuilt every 5 minutes based on the current OpenRouter roster
+---
 
 ## Component Details
 
-### LiteLLM Proxy (`config/litellm_config.yaml`)
+### 🛡️ Gatekeeper Gateway (`gatekeeper/`)
+- Entrypoint microservice exposed on host port `5050`.
+- FastAPI reverse proxy built with connection pooling.
+- Keeps client applications (Hermes) clean of intermediate failure retries.
 
-The proxy is the central routing layer. It provides:
-- **OpenAI-compatible API** on port 4000
-- **Model aliasing** (`auto`, `reasoning`, `local`)
-- **Router settings** (retry strategy, timeouts, allowed failures)
-- **Telemetry** (Langfuse, Prometheus, PostgreSQL)
-- **Response caching** (in-memory, 5-minute TTL)
+### 🧠 Micro-Classifier (`classifier/`)
+- Internal microservice on port `8000`.
+- Runs `cross-encoder/nli-deberta-v3-small` ONNX model.
+- Zero-shot natural language inference for semantic empty-promise detection with sub-millisecond CPU latency.
 
-### Dynamic Roster Sidecar (`frugallm/dynamic_roster_sidecar.py`)
+### ⚡ LiteLLM Router (`config/litellm_config.yaml`)
+- Internal model router on port `4000`.
+- Manages free model selection, fallbacks, and PostgreSQL spend logging.
 
-The sidecar is a daemon that runs alongside the proxy:
-- **Polls** OpenRouter `/api/v1/models` every 5 minutes
-- **Filters** for free models with tool support and large context windows
-- **Classifies** models as balanced or reasoning using keyword heuristics
-- **Writes** `config/dynamic_models.yaml` with numbered aliases and fallback chains
-- **Signals** LiteLLM via SIGHUP for zero-downtime config reload
+### 🔄 Dynamic Roster Sidecar (`frugallm/dynamic_roster_sidecar.py`)
+- Background container scanning OpenRouter every 5 minutes.
+- Auto-updates `config/dynamic_models.yaml` with the latest free model roster.
 
-### Custom Callbacks (`frugallm/custom_callbacks.py`)
-
-Three middleware hooks that modify requests and responses:
-- **Anti-Hijack**: Pre-call hook that defeats upstream persona injection
-- **Gemini Thought Signatures**: Pre-call hook that mocks missing fields
-- **Reasoning Extractor**: Post-call hook that surfaces hidden reasoning
-
-### Router CLI (`frugallm/router_cli.py`)
-
-A lightweight CLI tool for quick queries against the gateway.
-
-## Legacy Architecture
-
-The `legacy/router_server.py` file is the original monolithic implementation that predates the LiteLLM-based architecture. It includes all routing, caching, middleware, and model discovery in a single 750-line Python file using only stdlib. It's included for reference and as a fallback for environments where LiteLLM cannot be installed.
