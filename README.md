@@ -1,13 +1,14 @@
 <div align="center">
 
-# 🪙 FrugaLLM 2.0
+# 🪙 FrugaLLM 3.0
 
-### Zero-Cost AI Routing with Automatic Free Model Discovery
+### Zero-Cost AI Routing Stack with ONNX Semantic Gatekeeping & Automatic Free Model Discovery
 
-*A self-healing LLM proxy that automatically discovers and routes through the best available free models on OpenRouter, with local Ollama fallback, intelligent caching, and battle-tested middleware hooks.*
+*A self-healing containerized LLM gateway stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification, intelligent retry gatekeeping, local Ollama fallback, and battle-tested middleware hooks.*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/containerized-Docker_Compose-2496ED.svg)](https://www.docker.com/)
 [![LiteLLM](https://img.shields.io/badge/powered_by-LiteLLM-orange.svg)](https://github.com/BerriAI/litellm)
 
 </div>
@@ -16,222 +17,194 @@
 
 ## ✨ What Is This?
 
-FrugaLLM is an OpenAI-compatible proxy that **routes your LLM traffic through the best available free models** — automatically. It sits between your application and the cloud, providing:
+FrugaLLM is a containerized, OpenAI-compatible AI gateway stack that **routes your LLM traffic through the best available free models** while guaranteeing tool-calling integrity. It sits between your application (e.g. Hermes, AI Agents, CLI tools) and model backends, providing:
 
 - 🆓 **Zero-Cost Inference** — Automatically discovers and rotates through free models on OpenRouter
-- 🔄 **Self-Healing Fallback Chains** — If a model goes down, the next one picks up instantly
+- 🛡️ **ONNX Micro-Classifier & Gatekeeper** — Uses a zero-shot NLI neural classifier (`cross-encoder/nli-deberta-v3-small`) and an autonomous reverse-proxy Gatekeeper to catch and auto-retry "empty promise" hallucinations
+- 🔄 **Self-Healing Fallback Chains** — If a model rate-limits or fails, the next one picks up instantly
 - 🧠 **Reasoning Model Detection** — Heuristically separates reasoning models from balanced ones
-- 🛡️ **Anti-Hijack Middleware** — Defeats upstream persona injection from free-tier model providers
-- 💾 **In-Memory Response Caching** — Identical prompts get instant responses
-- 📊 **Native Telemetry** — Langfuse, Prometheus, and PostgreSQL spend logging out of the box
-- 🏠 **Local Fallback** — Falls back to Ollama when all cloud models are exhausted
+- 🔒 **Anti-Hijack Middleware** — Defeats upstream persona injection from free-tier model providers
+- 💾 **In-Memory Caching & Telemetry** — Built-in response caching, Langfuse, Prometheus, and PostgreSQL spend logging
+- 🏠 **Local Fallback** — Seamless fallback to Ollama when cloud models are exhausted
 
-## 🏗️ Architecture
+---
+
+## 🏗️ FrugaLLM 3.0 Architecture
+
+FrugaLLM 3.0 runs as a multi-container Docker Compose stack. Only the **Gatekeeper** is exposed to host applications (`:5050`), keeping internal routing and classifier services isolated on a private bridge network (`frugallm-net`).
 
 ```mermaid
 flowchart TB
-    subgraph Clients["Your Applications"]
-        A[AI Agent / App]
+    subgraph Clients["Applications & Agents"]
+        A[Hermes / AI Agent]
         B[CLI Tool]
-        C[Any OpenAI Client]
+        C[OpenAI SDK Client]
     end
 
-    subgraph FrugaLLM["FrugaLLM 2.0"]
+    subgraph FrugaLLM["FrugaLLM 3.0 Container Stack"]
         direction TB
-        LLM["LiteLLM Proxy<br/>(Port 4000)"]
-        MW["Middleware Hooks<br/>Anti-Hijack · Thought Sigs · Reasoning Extractor"]
-        SC["Dynamic Roster Sidecar<br/>(Polls every 5 min)"]
-        CFG["dynamic_models.yaml"]
+        GK["🛡️ Gatekeeper Gateway<br/>(FastAPI Reverse Proxy :5050)"]
+        CL["🧠 Micro-Classifier<br/>(ONNX NLI Neural Model :8000)"]
+        LLM["⚡ LiteLLM Proxy<br/>(Internal Model Router :4000)"]
+        MW["Middleware Callbacks<br/>Anti-Hijack · Thought Sigs · Reasoning"]
+        SC["🔄 Dynamic Roster Sidecar<br/>(Polls OpenRouter every 5 min)"]
+        DB["🐘 PostgreSQL DB<br/>(Spend & Usage Logging :5432)"]
     end
 
     subgraph Backends["Model Backends"]
-        OR["OpenRouter<br/>(Free Models)"]
-        OL["Ollama<br/>(Local Fallback)"]
-        GPU["GPU Node<br/>(Optional)"]
-        PAID["Paid Models<br/>(Emergency Fallback)"]
+        OR["OpenRouter (Free Models)"]
+        OL["Ollama (Local Fallback)"]
     end
 
-    A & B & C -->|OpenAI API| LLM
-    LLM --> MW
-    MW --> OR & OL & GPU & PAID
+    A & B & C -->|OpenAI API :5050| GK
+    GK -->|1. Request| LLM
+    LLM --> MW --> OR & OL
+    LLM -->|Response| GK
+    GK -->|2. Check Text| CL
+    CL -->|Empty Promise?| GK
+    GK -->|3. Auto-Retry + Reprimand| LLM
     SC -->|Discovers free models| OR
-    SC -->|Writes| CFG
-    CFG -->|SIGHUP reload| LLM
+    SC -->|Updates config| LLM
+    LLM --> DB
 ```
 
-## 🚀 Quickstart
+---
 
-### Option 1: Manual Setup
+## 🛡️ Gatekeeper vs. Classifier: How & Why They Work
+
+Small and free-tier LLMs frequently suffer from **"empty promise" hallucinations** — stating in conversational prose that they will run a tool (e.g., *"I will check the files for you..."*) without generating the required JSON `tool_calls` block. 
+
+FrugaLLM 3.0 solves this using a two-tier microservice architecture:
+
+| Component | Architecture & Tech | Role & Behavior | Why It Works |
+| :--- | :--- | :--- | :--- |
+| **🧠 Micro-Classifier**<br/>*(Port 8000, Internal)* | CPU-optimized **ONNX Runtime** executing `cross-encoder/nli-deberta-v3-small` (baked into container image at build time). | Receives text responses and performs zero-shot Natural Language Inference (NLI) classification to detect intent-to-act vs standard chat text. | **Semantic Accuracy**: Unlike brittle regex rules, the transformer model semantically understands conversational intent with high confidence and sub-millisecond CPU latency. |
+| **🛡️ Gatekeeper**<br/>*(Port 5050, Entrypoint)* | **FastAPI Async Reverse Proxy** standing in front of LiteLLM. | Intercepts chat completions, sends non-tool text to the Classifier, and owns the **internal retry loop**. If an empty promise is detected, it injects a system reprimand and retries upstream up to N times automatically. | **Hermes Independence**: The client application never sees intermediate model failures. The Gatekeeper transparently repairs responses before returning them. |
+| **⚡ In-Process Callbacks**<br/>*(LiteLLM Layer)* | LiteLLM ASGI middleware & Python callbacks (`custom_callbacks.py`). | Performs Tier 1/2 syntax schema validation, Anti-Hijack persona reinforcement, and Gemini `thought_signature` injection. | **Low-level Sanitization**: Handles payload-level normalization before requests leave for upstream providers. |
+
+---
+
+## 🚀 Quickstart (Docker Compose Stack)
+
+### 1. Clone & Configure
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/FrugaLLM-2.0.git
-cd FrugaLLM-2.0
+git clone https://github.com/chorned/frugaLLM.git
+cd frugaLLM
 
-# 2. Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure your API keys
+# Copy environment configuration
 cp .env.example .env
-# Edit .env and add your OPENROUTER_API_KEY
 
-# 5. Start the proxy
-make start
-
-# 6. In a separate terminal, start the sidecar
-make sidecar
+# Edit .env and set your OPENROUTER_API_KEY
+nano .env
 ```
 
-### Option 2: Docker Compose
+### 2. Launch the Stack
 
 ```bash
-# 1. Clone and configure
-git clone https://github.com/YOUR_USERNAME/FrugaLLM-2.0.git
-cd FrugaLLM-2.0
-cp .env.example .env
-# Edit .env and add your OPENROUTER_API_KEY
-
-# 2. Start everything
+# Build and start all containers (Gatekeeper, LiteLLM, Classifier, Sidecar, DB)
 docker compose up -d
 
-# 3. With PostgreSQL spend logging:
-docker compose --profile full up -d
+# Watch container startup and logs
+docker compose logs -f
 ```
 
-### Option 3: macOS LaunchAgent (Always-On)
+### 3. Verify Health
 
 ```bash
-# 1. Edit the plist files to set your paths
-vim services/com.frugallm.proxy.plist
-vim services/com.frugallm.sidecar.plist
-
-# 2. Install and load
-cp services/com.frugallm.*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.frugallm.proxy.plist
-launchctl load ~/Library/LaunchAgents/com.frugallm.sidecar.plist
+# Health check on the Gatekeeper entrypoint
+curl -s http://localhost:5050/health | python3 -m json.tool
 ```
+
+---
 
 ## 🔧 Usage
 
-### As an OpenAI-Compatible Endpoint
+### OpenAI-Compatible Endpoint
 
-FrugaLLM exposes a standard OpenAI-compatible API on `http://localhost:4000`:
+Point your application or OpenAI SDK client to `http://localhost:5050/v1`:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:4000/v1",
-    api_key="sk-frugallm-master"  # Your configured master key
+    base_url="http://localhost:5050/v1",
+    api_key="sk-frugallm-master"
 )
 
-# Use the "auto" model for automatic free model routing
+# Use 'auto' for dynamic free model routing with Gatekeeper protection
 response = client.chat.completions.create(
     model="auto",
-    messages=[{"role": "user", "content": "Explain quantum computing"}]
+    messages=[{"role": "user", "content": "Explain quantum computing in 3 bullet points."}]
 )
+
 print(response.choices[0].message.content)
 ```
 
 ### Model Aliases
 
-| Alias | Behavior |
-|-------|----------|
-| `auto` | Routes to the best available free balanced model |
-| `reasoning` | Routes to the best available free reasoning model |
-| `local` | Forces local Ollama execution (no cloud fallback) |
-| `pro` | Escalates to paid tier (if configured) |
-| Any model ID | Passthrough to the specific model |
+| Alias | Behavior | Fallback Chain |
+|---|---|---|
+| `auto` | Routes to best available free balanced model | `free_balanced` → Ollama |
+| `reasoning` | Routes to best available free reasoning model | `free_reasoning` → Local GPU / Ollama |
+| `local` | Direct local Ollama execution | None |
+| `pro` | Escalates to paid tier (if configured) | Gemini / Paid providers |
+| Direct ID | Passthrough to specific model (e.g. `meta-llama/llama-3.3-70b-instruct:free`) | None |
 
-### CLI Tool
-
-```bash
-# Quick query
-python -m frugallm.router_cli "What is the meaning of life?"
-
-# Pipe from stdin
-echo "Explain DNS" | python -m frugallm.router_cli --stdin
-
-# Force reasoning model
-python -m frugallm.router_cli -p engineer "Review this code..."
-
-# Check gateway health
-python -m frugallm.router_cli --models
-```
-
-## 🛡️ Middleware Hooks
-
-FrugaLLM includes three battle-tested middleware hooks that run on every request:
-
-### 1. Anti-Hijack Injection
-Many free-tier models on OpenRouter inject hidden system prompts (e.g., "You are OWL", "ZOO company"). This middleware appends a recency-bias exploit to your system message to ensure **your** persona always wins.
-
-### 2. Gemini Thought Signatures
-Gemini models require a `thought_signature` field on tool calls. If absent, the API returns a 400 error. This middleware ensures the field is always present, mocking it when necessary.
-
-### 3. Reasoning Extractor
-OpenRouter and OpenAI-compatible endpoints sometimes return reasoning in hidden fields (`reasoning`, `reasoning_content`). This middleware surfaces them properly so your application can display or log the model's chain-of-thought.
+---
 
 ## 📁 Project Structure
 
 ```
-FrugaLLM-2.0/
-├── config/
-│   ├── litellm_config.yaml        # Main LiteLLM proxy configuration
-│   └── dynamic_models.yaml        # Auto-generated by the sidecar
-├── frugallm/
-│   ├── __init__.py
-│   ├── custom_callbacks.py        # Middleware hooks (anti-hijack, thought sigs, reasoning)
-│   ├── dynamic_roster_sidecar.py  # Free model discovery daemon
-│   └── router_cli.py             # CLI wrapper
-├── legacy/
-│   └── router_server.py          # Original monolithic server (reference only)
-├── services/
-│   ├── com.frugallm.proxy.plist   # macOS LaunchAgent for the proxy
-│   └── com.frugallm.sidecar.plist # macOS LaunchAgent for the sidecar
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── CONFIGURATION.md
-│   └── TROUBLESHOOTING.md
-├── .env.example                   # Environment variable template
-├── docker-compose.yml             # Docker deployment
-├── Makefile                       # Convenience commands
-└── requirements.txt               # Python dependencies
+frugaLLM/
+├── docker-compose.yml        # Full 3.0 stack definition (Gatekeeper, Classifier, LiteLLM, Sidecar, DB)
+├── Dockerfile.sidecar        # Sidecar container image build
+├── Makefile                  # Convenience lifecycle commands
+├── README.md                 # System overview and quickstart
+├── SKILL.md                  # Agent procedure skill reference
+├── classifier/               # 🧠 ONNX zero-shot NLI classifier service
+│   ├── app.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── gatekeeper/               # 🛡️ FastAPI reverse proxy & internal retry engine
+│   ├── app.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── config/                   # Centralized configuration
+│   ├── litellm_config.yaml   # Proxy routing & fallback chains
+│   └── dynamic_models.yaml   # Auto-generated free model roster
+├── frugallm/                 # Core Python modules & custom callbacks
+│   ├── custom_callbacks.py   # Anti-hijack & thought signature hooks
+│   ├── dynamic_roster_sidecar.py # Free model scanner
+│   └── router_cli.py        # CLI interface
+└── docs/                     # Documentation & architectural diagrams
 ```
 
-## ⚙️ Configuration
+---
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
+## ⚙️ Key Environment Variables
 
-### Key Environment Variables
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENROUTER_API_KEY` | *(Required)* | OpenRouter API authentication |
+| `FRUGALLM_MASTER_KEY` | `sk-frugallm-master` | Proxy API key |
+| `LITELLM_URL` | `http://litellm:4000` | Gatekeeper → LiteLLM target URL |
+| `CLASSIFIER_URL` | `http://classifier:8000` | Gatekeeper → Classifier target URL |
+| `GATEKEEPER_MAX_RETRIES`| `3` | Maximum internal retry attempts on empty promises |
+| `FRUGALLM_POLL_INTERVAL`| `300` | Sidecar discovery interval (seconds) |
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | ✅ | — | Your OpenRouter API key |
-| `FRUGALLM_MASTER_KEY` | — | `sk-frugallm-master` | Proxy authentication key |
-| `FRUGALLM_PROXY_PORT` | — | `4000` | LiteLLM proxy port |
-| `FRUGALLM_POLL_INTERVAL` | — | `300` | Sidecar poll interval (seconds) |
-| `FRUGALLM_LOCAL_MODEL` | — | `llama3.2:latest` | Local Ollama model |
-| `FRUGALLM_LOCAL_URL` | — | `http://127.0.0.1:11434` | Ollama base URL |
+---
 
-## 📊 Telemetry
+## 🏗️ Built With
 
-FrugaLLM supports native telemetry through LiteLLM:
+- **[LiteLLM](https://github.com/BerriAI/litellm)** — Enterprise OpenAI-compatible routing and proxy engine.
+- **[FastAPI](https://fastapi.tiangolo.com/) & [HTTPX](https://www.python-httpx.org/)** — High-performance async gateway and connection pooling.
+- **[ONNX Runtime](https://onnxruntime.ai/) & [Hugging Face Optimum](https://huggingface.co/docs/optimum/index)** — Fast CPU neural classification.
+- **[DeBERTa-v3 NLI](https://huggingface.co/cross-encoder/nli-deberta-v3-small)** — Zero-shot natural language inference model by Nils Reimers.
 
-- **Langfuse** — Full request/response tracing with cost tracking
-- **Prometheus** — Metrics endpoint for Grafana dashboards
-- **PostgreSQL** — Spend logging for cost analytics
-
-Enable by uncommenting the relevant sections in `config/litellm_config.yaml` and setting the required environment variables.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please open an issue or PR.
+---
 
 ## 📜 License
 
 [MIT](LICENSE)
+

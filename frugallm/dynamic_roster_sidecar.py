@@ -155,6 +155,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "    litellm_params:",
             f"      model: {_litellm_model(b_id)}",
             "      api_key: os.environ/OPENROUTER_API_KEY",
+            "      max_tokens: 8192",
             "      timeout: 300",
             "      max_retries: 0",
             ""
@@ -170,6 +171,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "    litellm_params:",
         "      model: ollama/hermes:latest",
         "      api_base: http://127.0.0.1:11434",
+        "      max_tokens: 8192",
         "      timeout: 300",
         "      max_retries: 0",
         ""
@@ -184,6 +186,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "    litellm_params:",
             f"      model: {_litellm_model(r_id)}",
             "      api_key: os.environ/OPENROUTER_API_KEY",
+            "      max_tokens: 8192",
             "      timeout: 300",
             "      max_retries: 0",
             ""
@@ -200,6 +203,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "      model: openai//models/gemma-4-12b-it-Q5_K_M.gguf",
         "      api_base: http://100.80.59.45:8080/v1",
         "      api_key: \"na\"",
+        "      max_tokens: 8192",
         "      stop: [\"<turn|>\", \"<channel|>\", \"</s>\", \"<eos>\"]",
         "      timeout: 300",
         "      max_retries: 0",

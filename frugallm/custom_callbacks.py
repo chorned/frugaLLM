@@ -205,9 +205,7 @@ class HermesProxyHandler(CustomLogger):
 
     async def async_post_call_success_hook(
         self,
-        data: dict,
-        user_api_key_dict,
-        response,
+        *args,
         **kwargs,
     ):
         """
@@ -234,6 +232,12 @@ class HermesProxyHandler(CustomLogger):
         Returns:
             The (potentially modified) response object.
         """
+        response = kwargs.get("response")
+        if not response and len(args) >= 2:
+            response = args[1]
+        elif not response and len(args) >= 1:
+            response = args[0]
+            
         try:
             if hasattr(response, "choices"):
                 for choice in response.choices:
@@ -605,11 +609,16 @@ class HermesProxyHandler(CustomLogger):
                     type(dropped).__name__,
                 )
         
-        # DEBUG: dump data to file
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        with open(os.path.join(log_dir, "debug_data.json"), "a") as f:
-            f.write(json.dumps(data) + "\n")
+        # DEBUG: dump data to file (safeguarded for read-only container filesystems)
+        try:
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "debug_data.json")
+            with open(log_path, "a") as f:
+                f.write(json.dumps(data, default=str) + "\n")
+        except Exception as e:
+            log.debug("Debug file write skipped: %s", e)
+
 
 
 

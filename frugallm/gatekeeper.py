@@ -164,11 +164,9 @@ class ToolCallValidator:
     )
 
     _EMPTY_PROMISE_REPRIMAND = (
-        "[CRITICAL VALIDATION ERROR: You stated intent to perform an "
-        "action or update an internal system, but you did not execute "
-        "the required tool call. Do not describe the action or apologize. "
-        "Stop conversational prose. Output ONLY the JSON block for the "
-        "FIRST step immediately.]"
+        "CRITICAL: You stated intent to perform an action but did not "
+        "output the required JSON tool call. Stop conversational prose. "
+        "Output ONLY the JSON block immediately."
     )
 
     def __init__(self, tools: list):
@@ -256,13 +254,14 @@ class ToolCallValidator:
     ) -> tuple[bool, str | None, dict | None]:
         """Extract JSON from text content, validate, and construct response."""
 
+        # ── Tier 1.5: Heuristic Intent Detection ─────────────────────
+        # Evaluate heuristic BEFORE structural JSON validation.
+        # Do not short-circuit just because a stray { is found.
+        is_promise, reprimand = self._detect_empty_promise(content)
+
         # Tier 1: Syntax — extract JSON
         extracted = self._extract_json(content)
         if extracted is None:
-            # ── Tier 1.5: Heuristic Intent Detection ─────────────────────
-            # Before returning a generic syntax error, check if the model
-            # stated intent to act without actually producing a tool call.
-            is_promise, reprimand = self._detect_empty_promise(content)
             if is_promise:
                 return False, reprimand, None
 
@@ -279,6 +278,8 @@ class ToolCallValidator:
         try:
             parsed = json.loads(extracted)
         except json.JSONDecodeError as e:
+            if is_promise:
+                return False, reprimand, None
             return (
                 False,
                 f"[SYSTEM ERROR: Validation failed. Extracted text is not valid "
@@ -289,6 +290,8 @@ class ToolCallValidator:
         # Normalize to {name, arguments}
         tool_call_data = self._normalize_tool_call(parsed)
         if tool_call_data is None:
+            if is_promise:
+                return False, reprimand, None
             return (
                 False,
                 "[SYSTEM ERROR: Validation failed. JSON does not contain a "
@@ -331,49 +334,51 @@ class ToolCallValidator:
             1. Try markdown code fences (```json ... ``` or ``` ... ```)
             2. Fall back to outermost balanced-brace extraction
         """
-        # Strategy 1: Markdown fenced code blocks
-        md_match = re.search(
-            r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL
-        )
-        if md_match:
-            candidate = md_match.group(1).strip()
+        # Strategy 1: Markdown fenced code blocks (grab the last one)
+        md_matches = list(re.finditer(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL))
+        if md_matches:
+            candidate = md_matches[-1].group(1).strip()
             if candidate.startswith("{"):
                 return candidate
 
-        # Strategy 2: Outermost balanced braces
-        start = text.find("{")
+        # Strategy 2: Last balanced brace block
+        start = text.rfind("{")
         if start == -1:
             return None
 
         depth = 0
+        blocks = []
+        current_start = -1
         in_string = False
         escape_next = False
 
-        for i in range(start, len(text)):
-            c = text[i]
-
+        for i, c in enumerate(text):
             if escape_next:
                 escape_next = False
                 continue
-
             if c == "\\" and in_string:
                 escape_next = True
                 continue
-
             if c == '"' and not escape_next:
                 in_string = not in_string
                 continue
-
             if in_string:
                 continue
 
             if c == "{":
+                if depth == 0:
+                    current_start = i
                 depth += 1
             elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : i + 1]
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and current_start != -1:
+                        blocks.append(text[current_start:i+1])
+                        current_start = -1
 
+        if blocks:
+            return blocks[-1]
+            
         return None
 
     # ── Tier 1.5: Heuristic Intent Detection ──────────────────────────────
@@ -382,19 +387,27 @@ class ToolCallValidator:
         """
         Tier 1.5: Scan text for high-confidence action intents without tool calls.
 
-        Uses a dual-gate approach:
-            Gate 1 — Intent markers with execution verbs (e.g., "I will create", "Let me run")
-            Gate 2 — Action gerunds in operational context (e.g., "creating ticket", "running script")
-
-        Either gate matching is sufficient to trigger the reprimand, because
-        both patterns indicate the model is describing an action instead of
-        executing it.
+        Uses a multi-gate approach:
+            Gate 1 — Explicit programmatic tool names (e.g., `skill_view`, "skill_view")
+            Gate 2 — Intent markers with execution verbs (e.g., "I will create", "Let me run")
+            Gate 3 — Action gerunds in operational context (e.g., "creating ticket", "running script")
 
         Returns:
             (is_empty_promise, reprimand_or_none)
         """
+        # Gate 1: Check for explicit programmatic tool names mentioned in prose.
+        # We match names enclosed in backticks or quotes.
+        if self.tool_registry:
+            names = "|".join(re.escape(name) for name in self.tool_registry.keys())
+            # Match `tool_name` or "tool_name" or 'tool_name'
+            tool_name_pattern = re.compile(rf"([`'\"])({names})\1", re.IGNORECASE)
+            if tool_name_pattern.search(content):
+                return True, self._EMPTY_PROMISE_REPRIMAND
+
+        # Gates 2 & 3: Broad sequential verbs & gerunds
         if self._INTENT_MARKERS.search(content) or self._ACTION_GERUNDS.search(content):
             return True, self._EMPTY_PROMISE_REPRIMAND
+
         return False, None
 
     # ── Normalization ─────────────────────────────────────────────────────
@@ -729,7 +742,7 @@ class GatekeeperMiddleware:
                     f"LLM timeout after {timeout_seconds}s.",
                 )
                 fatal_resp["_gatekeeper_attempts"] = attempt
-                await self._send_json_response(send, fatal_resp, 200)
+                await self._send_json_response(send, fatal_resp, 200, was_streaming)
                 return
 
             # Non-200 → upstream error, pass through directly
@@ -740,19 +753,37 @@ class GatekeeperMiddleware:
 
             try:
                 resp_json = json.loads(response_body)
-            except Exception:
-                # Failed to parse JSON response — pass through as-is
+            except Exception as e:
+                log.warning(f"🛡️ Gatekeeper failed to parse response JSON (likely hit max tokens): {e}")
+                
+                # If Hermes requested a stream, wrap the truncated content in an SSE chunk
+                if was_streaming:
+                    raw_text = response_body.decode("utf-8", errors="ignore")
+                    sse_payload = (
+                        f"data: {json.dumps({'choices': [{'delta': {'content': raw_text}, 'finish_reason': 'length'}]})}\n\n"
+                        "data: [DONE]\n\n"
+                    ).encode("utf-8")
+                    
+                    headers = [
+                        (b"content-type", b"text/event-stream"),
+                        (b"content-length", str(len(sse_payload)).encode("utf-8")),
+                    ]
+                    await send({"type": "http.response.start", "status": response_status, "headers": headers})
+                    await send({"type": "http.response.body", "body": sse_payload})
+                    return
+                
+                # Non-streaming passthrough fallback
                 await send({"type": "http.response.start", "status": response_status, "headers": response_headers})
                 await send({"type": "http.response.body", "body": response_body})
                 return
 
             # ── Validate the response ────────────────────────────────────
-            is_valid, error_msg, validated_result = validator.validate_response(resp_json)
+            is_valid, error_msg, validated_result = await asyncio.to_thread(validator.validate_response, resp_json)
 
             if is_valid:
                 log.info(f"✅ Gatekeeper validation PASSED on attempt {attempt}.")
                 validated_result["_gatekeeper_attempts"] = attempt
-                await self._send_json_response(send, validated_result, 200)
+                await self._send_json_response(send, validated_result, 200, was_streaming)
                 return
 
             # ── Validation failed — prepare retry ────────────────────────
@@ -794,18 +825,28 @@ class GatekeeperMiddleware:
             "Max retries exceeded catching tool hallucinations.",
         )
         fatal_resp["_gatekeeper_attempts"] = max_retries
-        await self._send_json_response(send, fatal_resp, 200)
+        await self._send_json_response(send, fatal_resp, 200, was_streaming)
 
     @staticmethod
-    async def _send_json_response(send, data: dict, status: int):
-        """Send a JSON response with properly calculated content-length."""
-        body = json.dumps(data).encode("utf-8")
-        headers = [
-            (b"content-type", b"application/json"),
-            (b"content-length", str(len(body)).encode("utf-8")),
-        ]
-        await send({"type": "http.response.start", "status": status, "headers": headers})
-        await send({"type": "http.response.body", "body": body})
+    async def _send_json_response(send, data: dict, status: int, was_streaming: bool = False):
+        """Send a JSON response with properly calculated content-length, or SSE chunks."""
+        if was_streaming:
+            body = f"data: {json.dumps(data)}\n\n".encode("utf-8")
+            headers = [
+                (b"content-type", b"text/event-stream; charset=utf-8"),
+                (b"transfer-encoding", b"chunked"),
+            ]
+            await send({"type": "http.response.start", "status": status, "headers": headers})
+            await send({"type": "http.response.body", "body": body, "more_body": True})
+            await send({"type": "http.response.body", "body": b"data: [DONE]\n\n", "more_body": False})
+        else:
+            body = json.dumps(data).encode("utf-8")
+            headers = [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("utf-8")),
+            ]
+            await send({"type": "http.response.start", "status": status, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
 
 
 # ═════════════════════════════════════════════════════════════════════════════

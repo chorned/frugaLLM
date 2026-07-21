@@ -1,0 +1,11 @@
+# FrugaLLM v3 — Micro-Classifier Runtime Dependencies
+# CPU-only ONNX zero-shot classification service
+#
+# Note: torch is NOT included here — it's only needed at build time
+# for ONNX export (handled in the multi-stage Dockerfile).
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+transformers==4.45.2
+onnxruntime==1.20.1
+optimum[onnxruntime]==1.23.1

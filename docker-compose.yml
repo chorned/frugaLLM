@@ -1,18 +1,60 @@
-# FrugaLLM 2.0 — Docker Compose Stack
-# Starts the LiteLLM proxy, sidecar, and optional PostgreSQL for spend logging.
+# FrugaLLM 3.0 — Docker Compose Stack
+# Gatekeeper + Micro-Classifier + LiteLLM
+#
+# Architecture:
+#   [Hermes] --> :5050 --> [Gatekeeper] --> [LiteLLM :4000]
+#                                 |------> [Classifier :8000]
 #
 # Usage:
-#   cp .env.example .env   # Fill in your API keys
-#   docker compose up -d   # Start the stack
-#   docker compose logs -f # Watch logs
+#   docker compose -f docker-compose.v3.yml build
+#   docker compose -f docker-compose.v3.yml up -d
+#   docker compose -f docker-compose.v3.yml logs -f
 
 services:
-  # ── LiteLLM Proxy ────────────────────────────────────────────────────────
-  proxy:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: frugallm-proxy
+  # ── Gatekeeper Middleware (Entry Point) ──────────────────────────────────
+  # The sole service exposed to the host. Acts as a reverse proxy that
+  # intercepts chat completions, validates for empty promises via the
+  # classifier, and returns reprimands when detected.
+  gatekeeper:
+    build:
+      context: ./gatekeeper
+      dockerfile: Dockerfile
+    container_name: frugallm-gatekeeper
     ports:
-      - "4000:4000"
+      - "5050:5050"
+    environment:
+      - LITELLM_URL=http://litellm:4000
+      - CLASSIFIER_URL=http://classifier:8000
+      - GATEKEEPER_TIMEOUT=300
+      - GATEKEEPER_MAX_RETRIES=3
+    command: >
+      uvicorn app:app
+      --host 0.0.0.0
+      --port 5050
+      --workers 1
+      --log-level info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5050/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      litellm:
+        condition: service_healthy
+      classifier:
+        condition: service_healthy
+    networks:
+      - frugallm-net
+
+  # ── LiteLLM Proxy (Internal Only) ───────────────────────────────────────
+  # Model routing backend. Not exposed to host — only reachable via the
+  # Gatekeeper on the internal network.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: frugallm-litellm
+    # No ports exposed to host — internal only
     volumes:
       - ./config:/app/config:ro
       - ./frugallm:/app/frugallm:ro
@@ -20,21 +62,46 @@ services:
       - .env
     environment:
       - LITELLM_CONFIG_FILE=/app/config/litellm_config.yaml
+      - LITELLM_LOG=DEBUG
+      # Override DATABASE_URL to use internal Docker hostname instead of 127.0.0.1
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-litellm}
+      # Disable the in-process Gatekeeper middleware to avoid double-validation
+      - GATEKEEPER_ENABLED=false
     command: >
       --config /app/config/litellm_config.yaml
       --port 4000
       --num_workers 2
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness')\" || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 60s
     depends_on:
       db:
         condition: service_healthy
-        required: false
+    networks:
+      - frugallm-net
+
+  # ── Micro-Classifier (Internal Only) ────────────────────────────────────
+  # CPU-based ONNX zero-shot classifier for semantic empty promise detection.
+  # Model is baked into the image at build time for instant startup.
+  classifier:
+    build:
+      context: ./classifier
+      dockerfile: Dockerfile
+    container_name: frugallm-classifier
+    # No ports exposed to host — internal only
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s  # Model loading can take time on first boot
+    networks:
+      - frugallm-net
 
   # ── Dynamic Roster Sidecar ──────────────────────────────────────────────
   sidecar:
@@ -52,29 +119,38 @@ services:
       - FRUGALLM_PROXY_PORT=4000
     restart: unless-stopped
     depends_on:
-      proxy:
+      litellm:
         condition: service_healthy
+    networks:
+      - frugallm-net
 
-  # ── PostgreSQL (Optional: Spend Logging) ────────────────────────────────
+  # ── PostgreSQL (Spend Logging) ───────────────────────────────────────────
+  # Matches the existing standalone litellm-db container.
+  # Uses the external volume 'litellm_db_data' to preserve existing data.
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
     container_name: frugallm-db
-    environment:
-      POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: litellm_secret
-      POSTGRES_DB: litellm
     ports:
       - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - litellm_db_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U litellm"]
       interval: 10s
       timeout: 5s
       retries: 5
-    profiles:
-      - full  # Only start with: docker compose --profile full up
+    networks:
+      - frugallm-net
+
+networks:
+  frugallm-net:
+    driver: bridge
 
 volumes:
-  pgdata:
+  litellm_db_data:
+    external: true

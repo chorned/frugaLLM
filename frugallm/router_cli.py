@@ -27,7 +27,7 @@ import sys
 import urllib.request
 from urllib.error import URLError, HTTPError
 
-PROXY_URL = os.getenv("FRUGALLM_PROXY_URL", "http://127.0.0.1:4000")
+PROXY_URL = os.getenv("FRUGALLM_PROXY_URL", "http://127.0.0.1:5050")
 PROXY_API_KEY = os.getenv("FRUGALLM_MASTER_KEY", "sk-frugallm-master")
 
 # Baseline pricing for Claude 3.5 Sonnet (for telemetry cost comparison)

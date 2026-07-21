@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # Core: LiteLLM proxy server
-litellm[proxy]>=1.40.0
+litellm[proxy]==1.40.0
 
 # Validation: Gatekeeper Tier 2 Schema Validation
 jsonschema>=4.20.0

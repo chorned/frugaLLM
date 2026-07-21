@@ -15,23 +15,23 @@ litellm_settings:
   drop_params: true
   failure_callback:
   - langfuse
-  - postgres
-  - prometheus
+#  - postgres
+#  - prometheus
   middleware:
   - frugallm.gatekeeper.GatekeeperMiddleware
   set_verbose: true
   success_callback:
   - langfuse
-  - postgres
-  - prometheus
+#  - postgres
+#  - prometheus
 model_list:
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
     api_key: na
     extra_body:
       chat_template_kwargs:
-        enable_thinking: false
-        preserve_thinking: false
+        enable_thinking: true
+        preserve_thinking: true
     max_retries: 2
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
     stop:
@@ -40,15 +40,19 @@ model_list:
     - <eos>
     stream_timeout: 300
     timeout: 300
+  model_info:
+    input_cost_per_token: 0.0
+    output_cost_per_token: 0.0
   model_name: auto
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
     api_key: na
     extra_body:
       chat_template_kwargs:
-        enable_thinking: false
-        preserve_thinking: false
+        enable_thinking: true
+        preserve_thinking: true
     max_retries: 2
+    max_tokens: 8192
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
     stop:
     - <turn|>
@@ -56,15 +60,22 @@ model_list:
     - <eos>
     stream_timeout: 300
     timeout: 300
+  model_info:
+    input_cost_per_token: 0.0
+    output_cost_per_token: 0.0
   model_name: reasoning
 - litellm_params:
     api_base: http://127.0.0.1:11434
     max_retries: 0
     model: ollama/hermes:latest
     timeout: 60
+  model_info:
+    input_cost_per_token: 0.0
+    output_cost_per_token: 0.0
   model_name: local
 - litellm_params:
     api_key: os.environ/GEMINI_API_KEY
+    max_tokens: 8192
     model: gemini/gemini-2.5-pro
     timeout: 300
   model_name: gemini-2.5-pro

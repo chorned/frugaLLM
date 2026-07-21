@@ -1,8 +1,8 @@
 ---
 name: frugallm-gateway
-description: Manage FrugaLLM 2.0 Gateway — zero-cost AI routing proxy with automatic free model discovery, fallback chains, and middleware hooks
+description: Manage FrugaLLM 3.0 Gateway Stack — zero-cost AI routing proxy with ONNX neural empty promise classifier, FastAPI Gatekeeper, and automatic free model discovery
 skill_type: procedure
-applies_to: [gateway, litellm, routing, devops, llm-proxy]
+applies_to: [gateway, litellm, routing, devops, llm-proxy, docker, gatekeeper]
 triggers:
   - "FrugaLLM gateway issue"
   - "gateway timeout"
@@ -10,39 +10,73 @@ triggers:
   - "check dynamic models"
   - "free model routing"
   - "LiteLLM proxy"
-version: 2.0.0
+  - "FrugaLLM container stack"
+version: 3.0.0
 ---
 
-# FrugaLLM 2.0 — Gateway Management Skill
+# FrugaLLM 3.0 — Gateway Management Skill
 
-This skill covers the operation, troubleshooting, and maintenance of the FrugaLLM 2.0 Gateway — a self-healing LLM proxy that automatically discovers and routes through the best available free models on OpenRouter.
+This skill covers the operation, troubleshooting, and maintenance of the FrugaLLM 3.0 Gateway Stack — a self-healing LLM proxy stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification and autonomous reverse-proxy retry gatekeeping.
 
 ---
 
 ## Architecture Overview
 
-FrugaLLM uses **LiteLLM Proxy** (default port 4000) with a **Dynamic Roster Sidecar** to provide:
+FrugaLLM 3.0 runs as a multi-service Docker Compose stack:
 
-- Zero-cost inference via automatic free model discovery on OpenRouter
-- Self-healing fallback chains (balanced + reasoning tiers)
-- Enterprise-grade parallel tool calling and SSE streaming
-- ASGI Gatekeeper Middleware (Tier 1/1.5/2 tool call validation & empty promise detection)
-- Anti-hijack, Gemini thought signature, and reasoning extractor middlewares
-- Native Langfuse/Prometheus telemetry
-- In-memory response caching (5 min TTL)
-- Local Ollama fallback as last resort
+1. **🛡️ Gatekeeper Gateway (`:5050`)** — FastAPI reverse proxy entrypoint. Intercepts chat completions, inspects output for tool call integrity, and manages the internal retry loop when empty promises occur.
+2. **🧠 Micro-Classifier (`:8000`, Internal)** — CPU-optimized ONNX zero-shot NLI classifier (`cross-encoder/nli-deberta-v3-small`). Semantically detects intent-to-act vs standard text.
+3. **⚡ LiteLLM Proxy (`:4000`, Internal)** — Model routing core. Manages free model selection and fallbacks.
+4. **🔄 Dynamic Roster Sidecar** — Background daemon that scans OpenRouter every 5 minutes and updates `config/dynamic_models.yaml`.
+5. **🐘 PostgreSQL DB (`:5432`)** — Spend logging and usage tracking.
+
+```
+Clients (Hermes / Apps)
+   │ (port 5050)
+   ▼
+[ 🛡️ Gatekeeper ] ──(classify text)──▶ [ 🧠 Micro-Classifier (:8000) ]
+   │                                           │ (returns is_empty_promise)
+   │ (forward / internal retry) ◄──────────────┘
+   ▼
+[ ⚡ LiteLLM Router (:4000) ]
+   │
+   ├─► OpenRouter Free Roster (Auto / Reasoning)
+   └─► Local Ollama Fallback
+```
 
 ---
 
-## Endpoints (Model Aliases)
+## Endpoints & Model Aliases
 
-| Alias | Behavior | Fallback |
-|-------|----------|----------|
-| `auto` | Best available free balanced model | → `free_balanced` chain → Ollama |
-| `reasoning` | Best available free reasoning model | → `free_reasoning` chain → Ollama/GPU |
+Main API Base URL: `http://localhost:5050/v1`
+
+| Alias | Behavior | Fallback Chain |
+|-------|----------|----------------|
+| `auto` | Best available free balanced model | `free_balanced` → Ollama |
+| `reasoning` | Best available free reasoning model | `free_reasoning` → Local GPU / Ollama |
 | `local` | Explicit local Ollama (no cloud) | None |
-| `pro` | Paid escalation tier (if configured) | Gemini ladder |
+| `pro` | Paid escalation tier (if configured) | Gemini / Paid providers |
 | Any model ID | Direct passthrough to specific model | None |
+
+---
+
+## Gatekeeper vs. Classifier Roles
+
+- **Micro-Classifier (`classifier/`)**:
+  - Uses ONNX Runtime with DeBERTa-v3 NLI model baked into container image.
+  - Classifies non-tool text responses to determine if the LLM made an empty promise (intent to act without tool JSON).
+  - High accuracy without regex fragility.
+
+- **Gatekeeper Reverse Proxy (`gatekeeper/`)**:
+  - Intercepts requests on `:5050`.
+  - Converts streaming requests (`stream=True`) to non-streaming upstream to allow full validation.
+  - Controls internal retries: appends LLM output + system reprimand to message history and retries upstream up to `GATEKEEPER_MAX_RETRIES` times.
+  - Re-wraps validated responses as OpenAI SSE stream chunks if original request was streaming.
+
+- **In-Process Callbacks (`frugallm/custom_callbacks.py`)**:
+  - Anti-hijack system prompt reinforcement.
+  - Gemini `thought_signature` injection.
+  - Reasoning field surface extraction.
 
 ---
 
@@ -50,200 +84,82 @@ FrugaLLM uses **LiteLLM Proxy** (default port 4000) with a **Dynamic Roster Side
 
 | File | Purpose | Editable? |
 |------|---------|-----------|
-| `config/litellm_config.yaml` | Static model definitions, router settings, telemetry | ✅ Yes |
+| `docker-compose.yml` | Container stack definition | ✅ Yes |
+| `config/litellm_config.yaml` | Static model definitions & router settings | ✅ Yes |
 | `config/dynamic_models.yaml` | Auto-generated by sidecar every 5 min | ❌ No |
-| `.env` | API keys and runtime settings | ✅ Yes |
-| `frugallm/custom_callbacks.py` | Middleware hooks (Lifecycle) | ✅ Yes (careful) |
-| `frugallm/gatekeeper.py` | ASGI Gatekeeper Middleware (Validator) | ✅ Yes (careful) |
+| `.env` | API keys and environment overrides | ✅ Yes |
 
 ---
 
-## Key Environment Variables
+## Management Commands
 
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `OPENROUTER_API_KEY` | ✅ | — | Model inference |
-| `FRUGALLM_MASTER_KEY` | — | `sk-frugallm-master` | Proxy auth |
-| `FRUGALLM_PROXY_PORT` | — | `4000` | Proxy listen port |
-| `FRUGALLM_POLL_INTERVAL` | — | `300` | Sidecar poll interval (seconds) |
-| `FRUGALLM_LOCAL_MODEL` | — | `llama3.2:latest` | Ollama fallback model |
-| `FRUGALLM_LOCAL_URL` | — | `http://127.0.0.1:11434` | Ollama base URL |
-| `FRUGALLM_GPU_MODEL` | — | *(empty)* | GPU node model path |
-| `FRUGALLM_GPU_URL` | — | *(empty)* | GPU node base URL |
-
----
-
-## Startup & Management
-
-### Starting the Proxy
+### Start / Stop Container Stack
 
 ```bash
-# Foreground
-make start
-
-# Background
-make start-bg
-
-# Or directly
-python -m litellm --config config/litellm_config.yaml --port 4000
-```
-
-### Starting the Sidecar
-
-```bash
-# Foreground
-make sidecar
-
-# Background
-make sidecar-bg
-
-# Or directly
-FRUGALLM_CONFIG_DIR=config python -m frugallm.dynamic_roster_sidecar
-```
-
-### Docker Compose
-
-```bash
-# Basic stack (proxy + sidecar)
+# Start all services in background
 docker compose up -d
 
-# With PostgreSQL spend logging
-docker compose --profile full up -d
-```
+# Build and start (after code changes)
+docker compose up -d --build
 
-### macOS LaunchAgent
+# Stop stack
+docker compose down
 
-```bash
-# Install
-cp services/com.frugallm.*.plist ~/Library/LaunchAgents/
+# View logs for all services
+docker compose logs -f
 
-# Load
-launchctl load ~/Library/LaunchAgents/com.frugallm.proxy.plist
-launchctl load ~/Library/LaunchAgents/com.frugallm.sidecar.plist
-
-# Restart
-launchctl kickstart -k gui/$(id -u)/com.frugallm.proxy
+# View logs for specific service
+docker compose logs -f gatekeeper
+docker compose logs -f litellm
+docker compose logs -f classifier
 ```
 
 ---
 
 ## Health Checks & Debugging
 
-### Check Proxy Health
+### 1. Gatekeeper Gateway Health
 
 ```bash
-curl -s -H "Authorization: Bearer $FRUGALLM_MASTER_KEY" \
-  http://localhost:4000/health | python3 -m json.tool
+curl -s http://localhost:5050/health | python3 -m json.tool
 ```
 
-### List Active Models
-
-```bash
-curl -s -H "Authorization: Bearer $FRUGALLM_MASTER_KEY" \
-  http://localhost:4000/v1/models | python3 -m json.tool
+Expected output:
+```json
+{
+  "gatekeeper": "ready",
+  "litellm": "healthy",
+  "classifier": "healthy"
+}
 ```
 
-### Test a Request
+### 2. Test Chat Completion
 
 ```bash
-curl -X POST http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer $FRUGALLM_MASTER_KEY" \
+curl -X POST http://localhost:5050/v1/chat/completions \
+  -H "Authorization: Bearer sk-frugallm-master" \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
-### Quick Status (via Makefile)
+### 3. Check Dynamic Model Roster
 
 ```bash
-make status   # Health + models
-make test     # Send a test prompt
-make logs     # Tail proxy + sidecar logs
-```
-
-### Check Dynamic Roster
-
-```bash
-cat config/dynamic_models.yaml   # Current roster
-tail -f /tmp/frugallm-sidecar.log  # Sidecar activity
+cat config/dynamic_models.yaml
+docker compose logs -f sidecar
 ```
 
 ---
 
 ## Troubleshooting
 
-### Proxy Not Responding
+### Gatekeeper 502 / Upstream Connection Failed
 
-1. Check if LiteLLM is running: `pgrep -f litellm`
-2. Check logs: `tail -f /tmp/frugallm-proxy.log`
-3. Restart: `make stop && make start-bg`
+- **Cause**: LiteLLM or Classifier containers are starting or unhealthy.
+- **Fix**: Check `docker compose ps` and `docker compose logs -f litellm classifier`.
 
-### Ollama Timeout
+### Empty Promise Retries Exhausted
 
-**Symptom:** `litellm.Timeout: Connection timed out. Timeout passed=10.0`
-
-**Fix:** Increase timeout for Ollama endpoints in `config/litellm_config.yaml` to 60s.
-
-### Dynamic Models Not Updating
-
-1. Check sidecar logs: `tail -f /tmp/frugallm-sidecar.log`
-2. Verify `OPENROUTER_API_KEY` is set
-3. Verify proxy is reachable: `curl http://localhost:4000/health`
-4. Check if SIGHUP is reaching LiteLLM: `pgrep -f "litellm.*--config"`
-
-### Rate Limiting (429 Errors)
-
-This is expected with free models. FrugaLLM handles it automatically:
-- The failing model is benched for the `Retry-After` duration
-- The next model in the fallback chain picks up
-- Use a separate `OPENROUTER_MANAGEMENT_KEY` for the sidecar to avoid rate limit conflicts
-
-### ModuleNotFoundError: prisma
-
-Only happens when PostgreSQL logging is enabled. Fix: `pip install prisma && prisma generate`
-
-### GPU Node Unreachable via Tailscale
-
-macOS Sequoia blocks LAN IPs. Use your Tailscale IP (`100.x.y.z`) instead of raw LAN IPs.
-
----
-
-## Middleware Hooks
-
-The ecosystem utilizes two distinct middleware layers:
-
-### ASGI Middleware (`frugallm/gatekeeper.py`)
-| Hook | Phase | Purpose |
-|------|-------|---------|
-| Gatekeeper | Pre/Post-call | High-level referee that validates tool calls against JSON schemas, catches Tier 1.5 "Empty Promise" hallucinations (using regex heuristics), and handles retry cycles *before* requests hit the LLM stack. |
-
-### LiteLLM Callbacks (`frugallm/custom_callbacks.py`)
-| Hook | Phase | Purpose |
-|------|-------|---------|
-| Anti-Hijack | Pre-call | Appends recency-bias override to system message, defeating upstream persona injection from free model providers |
-| Gemini Thought Signatures | Pre-call | Injects mock `thought_signature` fields on tool_calls for Gemini models to prevent 400 errors |
-| Reasoning Extractor | Post-call | Surfaces hidden `reasoning` / `reasoning_content` fields from OpenRouter responses |
-
-To disable: remove the `callbacks` line from `litellm_settings` in `config/litellm_config.yaml`.
-
----
-
-## Fallback Chain Design
-
-The sidecar generates linear fallback chains that LiteLLM evaluates automatically:
-
-```
-auto → free_balanced → free_balanced_2 → ... → free_balanced_N → free_balanced_backup (Ollama)
-reasoning → free_reasoning → free_reasoning_2 → ... → free_reasoning_N → free_reasoning_backup (GPU/Ollama)
-```
-
-Selection criteria for free models:
-- Pricing: prompt and completion cost must both be `0`
-- Capabilities: must support `tools` parameter
-- Context: prefers models with ≥256k context window
-- Classification: reasoning models detected via keyword heuristics (`reasoning`, `chain-of-thought`, `think`, `-r1`, etc.)
-
----
-
-## Cost Profile
-
-All primary routing is **zero-cost** through OpenRouter free models. Paid tiers are opt-in and only triggered by explicit `pro` alias or manual configuration. The baseline cost comparison in the CLI uses Claude 3.5 Sonnet pricing ($3/$15 per 1M tokens) as a reference point.
+- **Symptom**: Gatekeeper returns a `[SYSTEM REPRIMAND]` message.
+- **Cause**: Model persistently outputted conversational text instead of JSON tool calls across all retry attempts.
+- **Fix**: The system automatically returned a reprimand to force the agent to retry or adjust its tool prompt.
