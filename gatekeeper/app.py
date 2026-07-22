@@ -62,7 +62,11 @@ log = logging.getLogger("frugallm-gatekeeper")
 # ─── Configuration ────────────────────────────────────────────────────────────
 LITELLM_URL = os.getenv("LITELLM_URL", "http://litellm:4000")
 CLASSIFIER_URL = os.getenv("CLASSIFIER_URL", "http://classifier:8000")
-REQUEST_TIMEOUT = float(os.getenv("GATEKEEPER_TIMEOUT", "300"))
+# Gatekeeper timeout MUST be higher than LiteLLM's model timeout (300s) +
+# retries (2×300s) to allow the full fallback chain to execute. If the
+# gatekeeper times out first, it returns 504 before LiteLLM can fall back
+# to a working model. See: 2026-07-22 thinker 504 incident.
+REQUEST_TIMEOUT = float(os.getenv("GATEKEEPER_TIMEOUT", "660"))
 MAX_RETRIES = int(os.getenv("GATEKEEPER_MAX_RETRIES", "3"))
 
 REPRIMAND_MESSAGE = (
