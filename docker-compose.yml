@@ -25,7 +25,7 @@ services:
     environment:
       - LITELLM_URL=http://litellm:4000
       - CLASSIFIER_URL=http://classifier:8000
-      - GATEKEEPER_TIMEOUT=300
+      - GATEKEEPER_TIMEOUT=180
       - GATEKEEPER_MAX_RETRIES=3
     command: >
       uvicorn app:app
@@ -70,10 +70,10 @@ services:
     command: >
       --config /app/config/litellm_config.yaml
       --port 4000
-      --num_workers 2
+      --num_workers 1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness')\" || exit 1"]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; req=urllib.request.Request('http://127.0.0.1:4000/health/readiness', headers={'Authorization': 'Bearer sk-sidecar-1'}); urllib.request.urlopen(req)\" || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
