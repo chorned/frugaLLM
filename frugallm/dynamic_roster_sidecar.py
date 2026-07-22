@@ -181,7 +181,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             f"      model: {_litellm_model(b_id)}",
             "      api_key: os.environ/OPENROUTER_API_KEY",
             "      max_tokens: 8192",
-            "      timeout: 300",
+            "      timeout: 35",
             "      max_retries: 0",
             ""
         ])
@@ -197,7 +197,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "      model: gemini/gemini-3.6-flash",
         "      api_key: os.environ/GOOGLE_API_KEY",
         "      max_tokens: 8192",
-        "      timeout: 300",
+        "      timeout: 120",
         "      max_retries: 0",
         ""
     ])
@@ -212,7 +212,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             f"      model: {_litellm_model(r_id)}",
             "      api_key: os.environ/OPENROUTER_API_KEY",
             "      max_tokens: 8192",
-            "      timeout: 300",
+            "      timeout: 35",
             "      max_retries: 0",
             ""
         ])
@@ -228,7 +228,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "      model: gemini/gemini-3.6-flash",
         "      api_key: os.environ/GOOGLE_API_KEY",
         "      max_tokens: 8192",
-        "      timeout: 300",
+        "      timeout: 120",
         "      max_retries: 0",
         ""
     ])

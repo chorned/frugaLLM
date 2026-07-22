@@ -40,8 +40,8 @@ model_list:
     - <turn|>
     - </s>
     - <eos>
-    stream_timeout: 300
-    timeout: 300
+    stream_timeout: 45
+    timeout: 45
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
@@ -61,8 +61,8 @@ model_list:
     - <turn|>
     - </s>
     - <eos>
-    stream_timeout: 300
-    timeout: 300
+    stream_timeout: 60
+    timeout: 60
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
@@ -72,7 +72,7 @@ model_list:
     max_retries: 0
     max_parallel_requests: 1
     model: ollama/hermes:latest
-    timeout: 60
+    timeout: 45
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
@@ -107,7 +107,7 @@ model_list:
     max_retries: 2
     max_parallel_requests: 1
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 300
+    timeout: 45
   model_name: frugal
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
@@ -119,7 +119,7 @@ model_list:
     max_retries: 2
     max_parallel_requests: 1
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 300
+    timeout: 45
   model_name: smart
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
@@ -132,7 +132,7 @@ model_list:
     max_parallel_requests: 1
     max_tokens: 8192
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 300
+    timeout: 60
   model_name: thinker
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
@@ -145,21 +145,21 @@ model_list:
     max_parallel_requests: 1
     max_tokens: 8192
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 300
+    timeout: 60
   model_name: reasoner
 - litellm_params:
     api_base: http://127.0.0.1:11434
     max_retries: 0
     max_parallel_requests: 1
     model: ollama/hermes:latest
-    timeout: 60
+    timeout: 45
   model_name: offline
 - litellm_params:
     api_base: http://127.0.0.1:11434
     max_retries: 0
     max_parallel_requests: 1
     model: ollama/hermes:latest
-    timeout: 60
+    timeout: 45
   model_name: private
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
@@ -189,7 +189,7 @@ model_list:
     max_retries: 2
     max_parallel_requests: 1
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 300
+    timeout: 45
   model_name: free
 
 # ── Router Settings ──
