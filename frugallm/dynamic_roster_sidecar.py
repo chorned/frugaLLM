@@ -125,6 +125,15 @@ def _is_reasoning_model(model_data: dict) -> bool:
 def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> bool:
     """
     Write the dynamic model definitions to a YAML include file using fallback chaining.
+
+    IMPORTANT: This file is the SINGLE SOURCE OF TRUTH for all router_settings,
+    including fallbacks. LiteLLM's include: mechanism OVERWRITES (not merges)
+    router_settings between files. If any router_settings exist in litellm_config.yaml,
+    they will be silently dropped when this file is loaded.
+
+    See: 2026-07-22 thinker 503 incident — all pseudo-model alias fallbacks were
+    missing because they were defined in litellm_config.yaml and overwritten by
+    this file's router_settings.
     """
     def _litellm_model(or_id: str) -> str:
         if or_id.startswith("openrouter/") or or_id.startswith("ollama/") or or_id.startswith("openai/"):
@@ -140,10 +149,26 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "model_list:"
     ]
 
+    # ── Static fallbacks for pseudo-model aliases and core models ──
+    # These MUST live here (not in litellm_config.yaml) because LiteLLM's
+    # include: mechanism overwrites router_settings rather than merging them.
     fallbacks = [
-        "    - {\"auto\": [\"free_balanced\"]}",
-        "    - {\"reasoning\": [\"free_reasoning\"]}",
-        "    - {\"local\": [\"free_balanced\"]}"
+        "    # ── Pseudo-Model Alias Fallbacks ──",
+        '    - {"frugal": ["free_balanced", "gemini-flash"]}',
+        '    - {"smart": ["free_balanced", "gemini-flash"]}',
+        '    - {"thinker": ["free_reasoning", "gemini-flash"]}',
+        '    - {"reasoner": ["free_reasoning", "gemini-flash"]}',
+        '    - {"offline": ["free_balanced", "gemini-flash"]}',
+        '    - {"private": ["free_balanced", "gemini-flash"]}',
+        '    - {"cloud": ["gemini-flash"]}',
+        '    - {"fast": ["gemini-flash-lite"]}',
+        '    - {"lite": ["gemini-flash-lite"]}',
+        '    - {"free": ["free_balanced", "gemini-flash"]}',
+        "    # ── Core Model Fallbacks ──",
+        '    - {"auto": ["free_balanced", "gemini-flash"]}',
+        '    - {"reasoning": ["free_reasoning", "gemini-flash"]}',
+        '    - {"local": ["free_balanced", "gemini-flash"]}',
+        "    # ── Dynamic Free Model Chains (generated) ──",
     ]
 
     # Generate Balanced Chain
@@ -208,9 +233,16 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         ""
     ])
 
-    # Add router_settings fallbacks
+    # ── Full router_settings block ──
+    # This is the SINGLE SOURCE OF TRUTH for all router settings.
     yaml_lines.extend([
         "router_settings:",
+        "  allowed_fails: 3",
+        "  num_retries: 2",
+        "  retry_after: 60",
+        "  routing_strategy: simple-shuffle",
+        "  stream_timeout: 300",
+        "  timeout: 300",
         "  fallbacks:"
     ])
     yaml_lines.extend(fallbacks)
@@ -223,7 +255,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         tmp_path = _DYNAMIC_MODELS_PATH.with_suffix(".tmp")
         tmp_path.write_text(yaml_content)
         tmp_path.rename(_DYNAMIC_MODELS_PATH)
-        log.info(f"✓ Wrote dynamic_models.yaml (balanced={len(balanced_ids)}, reasoning={len(reasoning_ids)})")
+        log.info(f"✓ Wrote dynamic_models.yaml (balanced={len(balanced_ids)}, reasoning={len(reasoning_ids)}, fallback_entries={len(fallbacks)})")
         return True
     except Exception as e:
         log.error(f"Failed to write dynamic_models.yaml: {e}")

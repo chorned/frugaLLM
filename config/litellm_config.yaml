@@ -192,25 +192,9 @@ model_list:
     timeout: 300
   model_name: free
 
-router_settings:
-  allowed_fails: 3
-  fallbacks:
-  # Friendly Aliases Fallbacks
-  - {"frugal": ["free_balanced", "gemini-flash"]}
-  - {"smart": ["free_balanced", "gemini-flash"]}
-  - {"thinker": ["free_reasoning", "gemini-flash"]}
-  - {"reasoner": ["free_reasoning", "gemini-flash"]}
-  - {"offline": ["free_balanced", "gemini-flash"]}
-  - {"private": ["free_balanced", "gemini-flash"]}
-  - {"cloud": ["gemini-flash"]}
-  - {"fast": ["gemini-flash-lite"]}
-  - {"lite": ["gemini-flash-lite"]}
-  # Core Fallbacks
-  - {"auto": ["gemini-flash"]}
-  - {"reasoning": ["gemini-flash"]}
-  - {"local": ["gemini-flash"]}
-  num_retries: 2
-  retry_after: 60
-  routing_strategy: simple-shuffle
-  stream_timeout: 300
-  timeout: 300
+# ── Router Settings ──
+# IMPORTANT: All router_settings (including fallbacks) are defined in
+# dynamic_models.yaml, which is the single source of truth.
+# LiteLLM's include: mechanism OVERWRITES (not merges) router_settings,
+# so defining them here would be silently dropped when the dynamic
+# models file is loaded. See: 2026-07-22 thinker 503 incident.
