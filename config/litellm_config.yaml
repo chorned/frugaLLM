@@ -25,6 +25,7 @@ litellm_settings:
 #  - postgres
 #  - prometheus
 model_list:
+# ── Core Model Entries ──
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
     api_key: na
@@ -33,6 +34,7 @@ model_list:
         enable_thinking: true
         preserve_thinking: true
     max_retries: 2
+    max_parallel_requests: 1
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
     stop:
     - <turn|>
@@ -52,6 +54,7 @@ model_list:
         enable_thinking: true
         preserve_thinking: true
     max_retries: 2
+    max_parallel_requests: 1
     max_tokens: 8192
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
     stop:
@@ -67,6 +70,7 @@ model_list:
 - litellm_params:
     api_base: http://127.0.0.1:11434
     max_retries: 0
+    max_parallel_requests: 1
     model: ollama/hermes:latest
     timeout: 60
   model_info:
@@ -74,13 +78,137 @@ model_list:
     output_cost_per_token: 0.0
   model_name: local
 - litellm_params:
-    api_key: os.environ/GEMINI_API_KEY
+    api_key: os.environ/GOOGLE_API_KEY
+    max_tokens: 8192
+    model: gemini/gemini-3.6-flash
+    timeout: 300
+  model_name: gemini-flash
+- litellm_params:
+    api_key: os.environ/GOOGLE_API_KEY
+    max_tokens: 8192
+    model: gemini/gemini-3.5-flash-lite
+    timeout: 300
+  model_name: gemini-flash-lite
+- litellm_params:
+    api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
     model: gemini/gemini-2.5-pro
     timeout: 300
-  model_name: gemini-2.5-pro
+  model_name: gemini-pro
+
+# ── Intuitive Friendly Pseudo-Model Aliases ──
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    max_retries: 2
+    max_parallel_requests: 1
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    timeout: 300
+  model_name: frugal
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    max_retries: 2
+    max_parallel_requests: 1
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    timeout: 300
+  model_name: smart
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    max_retries: 2
+    max_parallel_requests: 1
+    max_tokens: 8192
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    timeout: 300
+  model_name: thinker
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    max_retries: 2
+    max_parallel_requests: 1
+    max_tokens: 8192
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    timeout: 300
+  model_name: reasoner
+- litellm_params:
+    api_base: http://127.0.0.1:11434
+    max_retries: 0
+    max_parallel_requests: 1
+    model: ollama/hermes:latest
+    timeout: 60
+  model_name: offline
+- litellm_params:
+    api_base: http://127.0.0.1:11434
+    max_retries: 0
+    max_parallel_requests: 1
+    model: ollama/hermes:latest
+    timeout: 60
+  model_name: private
+- litellm_params:
+    api_key: os.environ/GOOGLE_API_KEY
+    max_tokens: 8192
+    model: gemini/gemini-3.6-flash
+    timeout: 300
+  model_name: cloud
+- litellm_params:
+    api_key: os.environ/GOOGLE_API_KEY
+    max_tokens: 8192
+    model: gemini/gemini-3.5-flash-lite
+    timeout: 300
+  model_name: fast
+- litellm_params:
+    api_key: os.environ/GOOGLE_API_KEY
+    max_tokens: 8192
+    model: gemini/gemini-3.5-flash-lite
+    timeout: 300
+  model_name: lite
+- litellm_params:
+    api_base: http://100.80.59.45:8080/v1
+    api_key: na
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    max_retries: 2
+    max_parallel_requests: 1
+    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
+    timeout: 300
+  model_name: free
+
 router_settings:
   allowed_fails: 3
+  fallbacks:
+  # Friendly Aliases Fallbacks
+  - {"frugal": ["free_balanced", "gemini-flash"]}
+  - {"smart": ["free_balanced", "gemini-flash"]}
+  - {"thinker": ["free_reasoning", "gemini-flash"]}
+  - {"reasoner": ["free_reasoning", "gemini-flash"]}
+  - {"offline": ["free_balanced", "gemini-flash"]}
+  - {"private": ["free_balanced", "gemini-flash"]}
+  - {"cloud": ["gemini-flash"]}
+  - {"fast": ["gemini-flash-lite"]}
+  - {"lite": ["gemini-flash-lite"]}
+  # Core Fallbacks
+  - {"auto": ["gemini-flash"]}
+  - {"reasoning": ["gemini-flash"]}
+  - {"local": ["gemini-flash"]}
   num_retries: 2
   retry_after: 60
   routing_strategy: simple-shuffle

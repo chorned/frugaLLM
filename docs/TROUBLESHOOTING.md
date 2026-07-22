@@ -86,7 +86,7 @@ curl -s http://localhost:5050/health | python3 -m json.tool
 
 # Test chat completion
 curl -X POST http://localhost:5050/v1/chat/completions \
-  -H "Authorization: Bearer sk-frugallm-master" \
+  -H "Authorization: Bearer sk-sidecar-1" \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Quick check"}]}'
 

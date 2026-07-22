@@ -1,8 +1,8 @@
 ---
 name: frugallm-gateway
-description: Manage FrugaLLM 3.0 Gateway Stack — zero-cost AI routing proxy with ONNX neural empty promise classifier, FastAPI Gatekeeper, and automatic free model discovery
+description: Manage FrugaLLM 3.0 Gateway Stack — zero-cost AI routing proxy with ONNX neural empty promise classifier, FastAPI Gatekeeper, automatic free model discovery, Gemini fleet, and Langfuse telemetry
 skill_type: procedure
-applies_to: [gateway, litellm, routing, devops, llm-proxy, docker, gatekeeper]
+applies_to: [gateway, litellm, routing, devops, llm-proxy, docker, gatekeeper, langfuse, Gemini]
 triggers:
   - "FrugaLLM gateway issue"
   - "gateway timeout"
@@ -11,12 +11,14 @@ triggers:
   - "free model routing"
   - "LiteLLM proxy"
   - "FrugaLLM container stack"
+  - "run integration test suite"
+  - "test frugaLLM"
 version: 3.0.0
 ---
 
 # FrugaLLM 3.0 — Gateway Management Skill
 
-This skill covers the operation, troubleshooting, and maintenance of the FrugaLLM 3.0 Gateway Stack — a self-healing LLM proxy stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification and autonomous reverse-proxy retry gatekeeping.
+This skill covers the operation, troubleshooting, testing, and maintenance of the FrugaLLM 3.0 Gateway Stack — a self-healing LLM proxy stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification, paid Gemini 3.6 Flash terminal fallback, 100% Langfuse telemetry tracking, and intuitive pseudo-model aliases for agents and users.
 
 ---
 
@@ -26,8 +28,8 @@ FrugaLLM 3.0 runs as a multi-service Docker Compose stack:
 
 1. **🛡️ Gatekeeper Gateway (`:5050`)** — FastAPI reverse proxy entrypoint. Intercepts chat completions, inspects output for tool call integrity, and manages the internal retry loop when empty promises occur.
 2. **🧠 Micro-Classifier (`:8000`, Internal)** — CPU-optimized ONNX zero-shot NLI classifier (`cross-encoder/nli-deberta-v3-small`). Semantically detects intent-to-act vs standard text.
-3. **⚡ LiteLLM Proxy (`:4000`, Internal)** — Model routing core. Manages free model selection and fallbacks.
-4. **🔄 Dynamic Roster Sidecar** — Background daemon that scans OpenRouter every 5 minutes and updates `config/dynamic_models.yaml`.
+3. **⚡ LiteLLM Proxy (`:4000`, Internal)** — Model routing core. Manages free model selection, fallbacks, and Langfuse telemetry hooks.
+4. **🔄 Dynamic Roster Sidecar** — Background daemon that scans OpenRouter every 5 minutes and writes candidate chains to `config/dynamic_models.yaml`.
 5. **🐘 PostgreSQL DB (`:5432`)** — Spend logging and usage tracking.
 
 ```
@@ -38,72 +40,96 @@ Clients (Hermes / Apps)
    │                                           │ (returns is_empty_promise)
    │ (forward / internal retry) ◄──────────────┘
    ▼
-[ ⚡ LiteLLM Router (:4000) ]
+[ ⚡ LiteLLM Router (:4000) ] ──(telemetry)──▶ [ 📊 Langfuse Cloud ]
    │
-   ├─► OpenRouter Free Roster (Auto / Reasoning)
-   └─► Local Ollama Fallback
+   ├─► OpenRouter Free Roster (Balanced / Reasoning)
+   ├─► Local Gemma / Ollama
+   └─► Paid Gemini Fleet Terminal Fallback (Gemini 3.6 Flash)
 ```
 
 ---
 
-## Endpoints & Model Aliases
+## Model Aliases & Routing Roster
 
 Main API Base URL: `http://localhost:5050/v1`
 
-| Alias | Behavior | Fallback Chain |
-|-------|----------|----------------|
-| `auto` | Best available free balanced model | `free_balanced` → Ollama |
-| `reasoning` | Best available free reasoning model | `free_reasoning` → Local GPU / Ollama |
-| `local` | Explicit local Ollama (no cloud) | None |
-| `pro` | Paid escalation tier (if configured) | Gemini / Paid providers |
-| Any model ID | Direct passthrough to specific model | None |
+### Intuitive Pseudo-Model Aliases (Recommended)
+
+| Intuitive Alias | Legacy Alias | Routing Strategy / Fallback Chain | Primary Use Case |
+|---|---|---|---|
+| **`frugal`** / **`smart`** | `auto` | Local Gemma 4 12B → OpenRouter Free → Paid Gemini 3.6 Flash | General tasks, coding, Q&A (default) |
+| **`thinker`** / **`reasoner`** | `reasoning` | Local Gemma 4 12B (CoT) → Free Reasoning → Paid Gemini 3.6 Flash | Complex architecture, math, multi-step planning |
+| **`offline`** / **`private`** | `local` | Ollama `hermes:latest` (100% local CPU) | Sensitive data, offline work |
+| **`free`** | `free_balanced` | Top OpenRouter free model (dynamic 5-min pool) | Zero-cost cloud execution |
+| **`cloud`** | `gemini-flash` | Paid Gemini 3.6 Flash ($1.50 / $7.50 per 1M) | Guaranteed uptime, large context |
+| **`fast`** / **`lite`** | `gemini-flash-lite` | Paid Gemini 3.5 Flash-Lite ($0.30 / $2.50 per 1M) | Low latency, high-volume subagent tasks |
+| `gemini-pro` | `gemini-pro` | Gemini 2.5 Pro (legacy alias) | Deep reasoning fallback |
+
+> **Backwards Compatibility**: All legacy aliases (`auto`, `reasoning`, `local`, `gemini-flash`, `gemini-pro`) remain 100% supported.
 
 ---
 
-## Gatekeeper vs. Classifier Roles
+## Router CLI & Test Commands
 
-- **Micro-Classifier (`classifier/`)**:
-  - Uses ONNX Runtime with DeBERTa-v3 NLI model baked into container image.
-  - Classifies non-tool text responses to determine if the LLM made an empty promise (intent to act without tool JSON).
-  - High accuracy without regex fragility.
+### 1. FrugaLLM Router CLI
 
-- **Gatekeeper Reverse Proxy (`gatekeeper/`)**:
-  - Intercepts requests on `:5050`.
-  - Converts streaming requests (`stream=True`) to non-streaming upstream to allow full validation.
-  - Controls internal retries: appends LLM output + system reprimand to message history and retries upstream up to `GATEKEEPER_MAX_RETRIES` times.
-  - Re-wraps validated responses as OpenAI SSE stream chunks if original request was streaming.
+The interactive CLI wrapper communicates directly with the Gateway:
 
-- **In-Process Callbacks (`frugallm/custom_callbacks.py`)**:
-  - Anti-hijack system prompt reinforcement.
-  - Gemini `thought_signature` injection.
-  - Reasoning field surface extraction.
+```bash
+# General query (uses frugal / auto alias)
+python -m frugallm.router_cli "Explain quantum computing"
+
+# Use the deep reasoning / thinker alias
+python -m frugallm.router_cli --thinker "Design a microservice architecture"
+
+# Route to paid Gemini cloud tier directly
+python -m frugallm.router_cli --cloud "Summarize this paper"
+
+# Force offline CPU execution
+python -m frugallm.router_cli --offline "Process local logs"
+
+# Inspect gateway health & active roster
+python -m frugallm.router_cli --models
+```
+
+### 2. Integration Test Suite
+
+The stack includes a comprehensive, dependency-free test runner covering 23+ assertion check points across 5 test groups:
+
+```bash
+# Run full integration test suite (includes live cloud & dynamic model tests)
+make test-suite
+
+# Or run directly via Python
+python3 tests/test_integration.py
+
+# CLI Options:
+python3 tests/test_integration.py --skip-cloud    # Skip paid API tests (Gemini fleet)
+python3 tests/test_integration.py --skip-dynamic   # Skip OpenRouter dynamic model tests
+python3 tests/test_integration.py --verbose        # Show detailed response bodies
+```
 
 ---
 
-## Configuration Files
+## Telemetry & Langfuse Tracking
 
-| File | Purpose | Editable? |
-|------|---------|-----------|
-| `docker-compose.yml` | Container stack definition | ✅ Yes |
-| `config/litellm_config.yaml` | Static model definitions & router settings | ✅ Yes |
-| `config/dynamic_models.yaml` | Auto-generated by sidecar every 5 min | ❌ No |
-| `.env` | API keys and environment overrides | ✅ Yes |
+FrugaLLM integrates with **Langfuse Cloud** for 100% endpoint usage tracking:
+- **`success_callback` & `failure_callback`**: Hooks registered in `config/litellm_config.yaml`.
+- **Model Name Normalizer**: `custom_callbacks.py` prepends `openrouter/` to OpenRouter model logs, preventing duplicate entries in Langfuse dashboards.
+- **Metadata Forwarding**: Custom client tags, trace IDs, and autonomous tier annotations are forwarded automatically.
+
+Verify telemetry in tests via Group 5 of `make test-suite`.
 
 ---
 
 ## Management Commands
 
-### Start / Stop Container Stack
-
 ```bash
-# Start all services in background
+# Start container stack
 docker compose up -d
 
-# Build and start (after code changes)
+# Rebuild and start after changes
 docker compose up -d --build
-
-# Stop stack
-docker compose down
 
 # View logs for all services
 docker compose logs -f
@@ -111,55 +137,23 @@ docker compose logs -f
 # View logs for specific service
 docker compose logs -f gatekeeper
 docker compose logs -f litellm
-docker compose logs -f classifier
+docker compose logs -f sidecar
 ```
 
 ---
 
 ## Health Checks & Debugging
 
-### 1. Gatekeeper Gateway Health
-
 ```bash
+# Gatekeeper Gateway Health
 curl -s http://localhost:5050/health | python3 -m json.tool
-```
 
-Expected output:
-```json
-{
-  "gatekeeper": "ready",
-  "litellm": "healthy",
-  "classifier": "healthy"
-}
-```
-
-### 2. Test Chat Completion
-
-```bash
+# Test chat completion with new 'frugal' alias
 curl -X POST http://localhost:5050/v1/chat/completions \
-  -H "Authorization: Bearer sk-frugallm-master" \
+  -H "Authorization: Bearer sk-sidecar-1" \
   -H "Content-Type: application/json" \
-  -d '{"model": "auto", "messages": [{"role": "user", "content": "Hello"}]}'
-```
+  -d '{"model": "frugal", "messages": [{"role": "user", "content": "Hello"}]}'
 
-### 3. Check Dynamic Model Roster
-
-```bash
+# Inspect dynamic models written by sidecar
 cat config/dynamic_models.yaml
-docker compose logs -f sidecar
 ```
-
----
-
-## Troubleshooting
-
-### Gatekeeper 502 / Upstream Connection Failed
-
-- **Cause**: LiteLLM or Classifier containers are starting or unhealthy.
-- **Fix**: Check `docker compose ps` and `docker compose logs -f litellm classifier`.
-
-### Empty Promise Retries Exhausted
-
-- **Symptom**: Gatekeeper returns a `[SYSTEM REPRIMAND]` message.
-- **Cause**: Model persistently outputted conversational text instead of JSON tool calls across all retry attempts.
-- **Fix**: The system automatically returned a reprimand to force the agent to retry or adjust its tool prompt.

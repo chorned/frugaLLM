@@ -17,7 +17,7 @@ Usage:
 
 Environment Variables:
   FRUGALLM_PROXY_URL    LiteLLM proxy URL (default: http://127.0.0.1:4000)
-  FRUGALLM_MASTER_KEY   LiteLLM master key (default: sk-frugallm-master)
+  FRUGALLM_MASTER_KEY   LiteLLM master key (default: sk-sidecar-1)
 """
 
 import argparse
@@ -28,7 +28,7 @@ import urllib.request
 from urllib.error import URLError, HTTPError
 
 PROXY_URL = os.getenv("FRUGALLM_PROXY_URL", "http://127.0.0.1:5050")
-PROXY_API_KEY = os.getenv("FRUGALLM_MASTER_KEY", "sk-frugallm-master")
+PROXY_API_KEY = os.getenv("FRUGALLM_MASTER_KEY", "sk-sidecar-1")
 
 # Baseline pricing for Claude 3.5 Sonnet (for telemetry cost comparison)
 BASELINE_INPUT_COST_PER_TOKEN = 3.0 / 1_000_000
@@ -149,15 +149,30 @@ def main():
         help="Maps to reasoning or auto pools",
     )
     parser.add_argument(
+        "--thinker", "--reasoner", action="store_true", help="Use deep-reasoning pool (thinker)"
+    )
+    parser.add_argument(
+        "--offline", "--private", action="store_true", help="Force 100%% local CPU execution (offline)"
+    )
+    parser.add_argument(
+        "--cloud", action="store_true", help="Route directly to paid Gemini 3.6 Flash (cloud)"
+    )
+    parser.add_argument(
+        "--fast", "--lite", action="store_true", help="Route to Gemini 3.5 Flash-Lite (fast)"
+    )
+    parser.add_argument(
+        "--free", action="store_true", help="Route to top free OpenRouter model (free)"
+    )
+    parser.add_argument(
         "--pro", action="store_true", help="Force escalation to the paid Pro tier"
     )
     parser.add_argument(
-        "--local", action="store_true", help="Force local Ollama execution"
+        "--local", action="store_true", help="Force local Ollama execution (legacy alias for --offline)"
     )
     parser.add_argument(
         "--model",
         "-m",
-        help="Force a specific passthrough model (e.g. anthropic/claude-3.5-sonnet)",
+        help="Force a specific passthrough or pseudo-model alias (e.g. frugal, thinker, cloud)",
     )
     parser.add_argument(
         "--models",
@@ -182,11 +197,19 @@ def main():
         sys.exit(1)
 
     # ── Map CLI arguments to the gateway's model aliases ──
-    target_model = "auto"
-    if args.profile == "engineer":
-        target_model = "reasoning"
-    if args.local:
-        target_model = "local"
+    target_model = "thinker"  # Default execution uses thinker
+    if args.profile in ("engineer", "documenter", "devops"):
+        target_model = "free"
+    if args.thinker:
+        target_model = "thinker"
+    if args.local or args.offline:
+        target_model = "offline"
+    if args.cloud:
+        target_model = "cloud"
+    if args.fast:
+        target_model = "fast"
+    if args.free:
+        target_model = "free"
     if args.pro:
         target_model = "pro"
     if args.model:

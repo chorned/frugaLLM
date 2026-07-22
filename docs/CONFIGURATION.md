@@ -30,7 +30,7 @@
 | `CLASSIFIER_URL` | `http://classifier:8000` | Gatekeeper → Classifier internal URL |
 | `GATEKEEPER_MAX_RETRIES` | `3` | Maximum internal retries on empty promises |
 | `GATEKEEPER_TIMEOUT` | `300` | Request timeout for Gatekeeper (seconds) |
-| `FRUGALLM_MASTER_KEY` | `sk-frugallm-master` | Master authentication key for proxy |
+| `FRUGALLM_MASTER_KEY` | `sk-sidecar-1` | Master authentication key for proxy |
 | `FRUGALLM_POLL_INTERVAL` | `300` | Sidecar poll interval in seconds |
 
 ---

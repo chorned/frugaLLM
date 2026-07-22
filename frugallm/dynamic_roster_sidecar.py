@@ -169,8 +169,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     yaml_lines.extend([
         "  - model_name: free_balanced_backup",
         "    litellm_params:",
-        "      model: ollama/hermes:latest",
-        "      api_base: http://127.0.0.1:11434",
+        "      model: gemini/gemini-3.6-flash",
+        "      api_key: os.environ/GOOGLE_API_KEY",
         "      max_tokens: 8192",
         "      timeout: 300",
         "      max_retries: 0",
@@ -200,11 +200,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     yaml_lines.extend([
         "  - model_name: free_reasoning_backup",
         "    litellm_params:",
-        "      model: openai//models/gemma-4-12b-it-Q5_K_M.gguf",
-        "      api_base: http://100.80.59.45:8080/v1",
-        "      api_key: \"na\"",
+        "      model: gemini/gemini-3.6-flash",
+        "      api_key: os.environ/GOOGLE_API_KEY",
         "      max_tokens: 8192",
-        "      stop: [\"<turn|>\", \"<channel|>\", \"</s>\", \"<eos>\"]",
         "      timeout: 300",
         "      max_retries: 0",
         ""
@@ -288,11 +286,20 @@ def _wait_for_litellm() -> bool:
     Uses /v1/models instead of /health because /health probes all backends
     (including unreachable ones like offline Qwen) causing long timeouts.
     """
-    log.info("⏳ Waiting for LiteLLM proxy to become available...")
+    # Inside Docker: FRUGALLM_PROXY_PORT=4000, hostname=litellm
+    # On host: defaults to 127.0.0.1:5050 (Gatekeeper port)
+    proxy_port = os.getenv("FRUGALLM_PROXY_PORT", "5050")
+    proxy_host = os.getenv("FRUGALLM_PROXY_HOST", "127.0.0.1")
+    # If running in Docker (port 4000), use the Docker service name
+    if proxy_port == "4000" and proxy_host == "127.0.0.1":
+        proxy_host = "litellm"
+    proxy_url = f"http://{proxy_host}:{proxy_port}/v1/models"
+
+    log.info(f"⏳ Waiting for LiteLLM proxy at {proxy_url}...")
     for attempt in range(60):
         try:
             req = urllib.request.Request(
-                "http://127.0.0.1:5050/v1/models",
+                proxy_url,
                 headers={"Authorization": "Bearer sk-sidecar-1"},
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
@@ -303,7 +310,7 @@ def _wait_for_litellm() -> bool:
             pass
         time.sleep(5)
 
-    log.error("✗ LiteLLM proxy did not become available after 90s.")
+    log.error("✗ LiteLLM proxy did not become available after 300s.")
     return False
 
 
