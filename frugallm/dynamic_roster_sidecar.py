@@ -135,6 +135,12 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     missing because they were defined in litellm_config.yaml and overwritten by
     this file's router_settings.
     """
+    # Cap fallback chain length (default max 2 dynamic hops before gemini-flash)
+    # to prevent context loss and repetition across multiple disparate models.
+    max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "2"))
+    balanced_ids = balanced_ids[:max_chain_len]
+    reasoning_ids = reasoning_ids[:max_chain_len]
+
     def _litellm_model(or_id: str) -> str:
         if or_id.startswith("openrouter/") or or_id.startswith("ollama/") or or_id.startswith("openai/"):
             return or_id

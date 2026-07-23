@@ -164,8 +164,8 @@ class ToolCallValidator:
     )
 
     _EMPTY_PROMISE_REPRIMAND = (
-        "CRITICAL: You stated intent to perform an action but did not "
-        "output the required JSON tool call. Stop conversational prose. "
+        "CRITICAL VALIDATION ERROR: You stated intent to perform an action but did not "
+        "execute the required tool call. Stop conversational prose. "
         "Output ONLY the JSON block immediately."
     )
 
@@ -395,6 +395,18 @@ class ToolCallValidator:
         Returns:
             (is_empty_promise, reprimand_or_none)
         """
+        stripped = content.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            return False, None
+
+        reprimand = self._EMPTY_PROMISE_REPRIMAND
+        if self.tool_registry:
+            avail_tools = ", ".join(f"'{t}'" for t in list(self.tool_registry.keys())[:5])
+            reprimand = (
+                f"{self._EMPTY_PROMISE_REPRIMAND} Available tools: [{avail_tools}]. "
+                "Do not state intent in text — output the structured tool call immediately."
+            )
+
         # Gate 1: Check for explicit programmatic tool names mentioned in prose.
         # We match names enclosed in backticks or quotes.
         if self.tool_registry:
@@ -402,11 +414,11 @@ class ToolCallValidator:
             # Match `tool_name` or "tool_name" or 'tool_name'
             tool_name_pattern = re.compile(rf"([`'\"])({names})\1", re.IGNORECASE)
             if tool_name_pattern.search(content):
-                return True, self._EMPTY_PROMISE_REPRIMAND
+                return True, reprimand
 
         # Gates 2 & 3: Broad sequential verbs & gerunds
         if self._INTENT_MARKERS.search(content) or self._ACTION_GERUNDS.search(content):
-            return True, self._EMPTY_PROMISE_REPRIMAND
+            return True, reprimand
 
         return False, None
 

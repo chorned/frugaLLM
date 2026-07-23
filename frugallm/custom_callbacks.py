@@ -169,6 +169,11 @@ class HermesProxyHandler(CustomLogger):
         # This sanitizer runs FIRST so downstream middlewares see clean data.
         self._sanitize_openrouter_passthrough(data, model)
 
+        # ── Middleware 0.5: Message History Sanitizer ────────────────────
+        # Normalizes role content and tool call formats across fallback models
+        # (e.g. converting null content to empty string for assistant tool calls).
+        self._sanitize_message_history(messages)
+
         # ── Middleware 1: Anti-Hijack ─────────────────────────────────────
         # Some upstream providers (especially OpenRouter free tier) inject
         # hidden system prompts like "You are OWL" or "You work for ZOO".
@@ -445,6 +450,43 @@ class HermesProxyHandler(CustomLogger):
     # ═══════════════════════════════════════════════════════════════════════════
     # PRIVATE HELPER METHODS — Extracted middleware logic from router_server.py
     # ═══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _sanitize_message_history(messages: list) -> None:
+        """
+        Normalizes message role schemas and tool call attributes.
+
+        Different providers (OpenAI vs Gemini vs Ollama) handle null content,
+        tool call parameters, and reasoning fields differently. Replaying
+        un-sanitized history across model fallbacks can cause schema 400s or
+        confuse the fallback model.
+
+        Actions performed:
+        - Ensures assistant messages with tool_calls have content="" instead of None.
+        - Ensures tool role messages have valid non-null content strings.
+        - Preserves reasoning_content field on assistant turns if available.
+        """
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+
+            role = msg.get("role")
+
+            # Assistant messages: convert null content to empty string if tool_calls exist
+            if role == "assistant":
+                if msg.get("content") is None:
+                    msg["content"] = ""
+                # Preserve reasoning_content field if extracted previously
+                if "reasoning_content" in msg and not msg.get("reasoning_content"):
+                    msg.pop("reasoning_content", None)
+
+            # Tool response messages: ensure content is a non-null string
+            elif role == "tool":
+                content = msg.get("content")
+                if content is None:
+                    msg["content"] = ""
+                elif isinstance(content, (dict, list)):
+                    msg["content"] = json.dumps(content)
 
     @staticmethod
     def _enforce_anti_hijack(messages: list) -> None:

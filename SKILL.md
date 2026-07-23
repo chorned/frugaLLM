@@ -66,6 +66,8 @@ Main API Base URL: `http://localhost:5050/v1`
 | `gemini-pro` | `gemini-pro` | Gemini 2.5 Pro (legacy alias) | Deep reasoning fallback |
 
 > **Backwards Compatibility**: All legacy aliases (`auto`, `reasoning`, `local`, `gemini-flash`, `gemini-pro`) remain 100% supported.
+>
+> **Best Practice for Stateful / Multi-turn Sessions**: Dynamic free models (`frugal`, `free`) cap dynamic fallback chains to 2 hops before dropping to `gemini-flash`. For long-running, multi-file agentic tasks with complex tool calling, use **`cloud`** (`gemini-flash`) or **`thinker`** to avoid context shifts across different model providers mid-session.
 
 ---
 
