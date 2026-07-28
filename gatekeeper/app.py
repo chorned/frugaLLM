@@ -312,6 +312,42 @@ async def intercept_chat_completion(request: Request):
     )
 
 
+@app.get("/v1/models")
+@app.get("/models")
+async def proxy_models(request: Request):
+    """
+    Fetch models from LiteLLM and filter out pseudo-models.
+    """
+    headers = _build_forward_headers(request)
+    try:
+        resp = await _litellm_client.get(request.url.path, headers=headers, timeout=10.0)
+    except httpx.TimeoutException:
+        return JSONResponse(
+            content={"error": {"message": "Upstream timeout", "type": "timeout"}},
+            status_code=504,
+        )
+    except httpx.ConnectError:
+        return JSONResponse(
+            content={"error": {"message": "Upstream connection failed", "type": "connection_error"}},
+            status_code=502,
+        )
+
+    if resp.status_code != 200:
+        return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
+
+    try:
+        data = resp.json()
+        print(f"DEBUG: Before filter, len(data): {len(data.get('data', []))}")
+        if "data" in data and isinstance(data["data"], list):
+            data["data"] = [
+                m for m in data["data"]
+                if not str(m.get("id", "")).startswith("free_balanced") and not str(m.get("id", "")).startswith("free_reasoning")
+            ]
+        print(f"DEBUG: After filter, len(data): {len(data.get('data', []))}")
+        return JSONResponse(content=data, status_code=200)
+    except Exception:
+        return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
+
 # ─── Catch-All Proxy ─────────────────────────────────────────────────────────
 @app.api_route(
     "/{path:path}",

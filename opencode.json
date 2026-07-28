@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-plugin-litellm@latest"],
+  "provider": {
+    "litellm": {
+      "options": {
+        "baseURL": "http://127.0.0.1:5050/v1",
+        "apiKey": "sk-sidecar-1"
+      }
+    }
+  }
+}

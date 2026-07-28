@@ -179,10 +179,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
 
     # Generate Balanced Chain
     yaml_lines.append("  # ── Balanced Chain ──")
-    balanced_names = []
     for i, b_id in enumerate(balanced_ids):
-        model_name = _litellm_model(b_id)
-        balanced_names.append(model_name)
+        model_name = "free_balanced" if i == 0 else f"free_balanced_{i+1}"
         yaml_lines.extend([
             f"  - model_name: {model_name}",
             "    litellm_params:",
@@ -193,10 +191,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "      max_retries: 0",
             ""
         ])
-
-    for i, model_name in enumerate(balanced_names):
-        if i < len(balanced_names) - 1:
-            next_model = balanced_names[i+1]
+        if i < len(balanced_ids) - 1:
+            next_model = f"free_balanced_{i+2}"
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
@@ -214,10 +210,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
 
     # Generate Reasoning Chain
     yaml_lines.append("  # ── Reasoning Chain ──")
-    reasoning_names = []
     for i, r_id in enumerate(reasoning_ids):
-        model_name = _litellm_model(r_id)
-        reasoning_names.append(model_name)
+        model_name = "free_reasoning" if i == 0 else f"free_reasoning_{i+1}"
         yaml_lines.extend([
             f"  - model_name: {model_name}",
             "    litellm_params:",
@@ -228,10 +222,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "      max_retries: 0",
             ""
         ])
-
-    for i, model_name in enumerate(reasoning_names):
-        if i < len(reasoning_names) - 1:
-            next_model = reasoning_names[i+1]
+        if i < len(reasoning_ids) - 1:
+            next_model = f"free_reasoning_{i+2}"
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
@@ -251,9 +243,6 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     # This is the SINGLE SOURCE OF TRUTH for all router settings.
     yaml_lines.extend([
         "router_settings:",
-        "  model_group_alias:",
-        f"    free_balanced: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
         "  allowed_fails: 3",
         "  num_retries: 2",
         "  retry_after: 60",

@@ -2,8 +2,10 @@ general_settings:
   alerting: []
   allow_client_side_credentials: true
   master_key: sk-sidecar-1
+
 include:
 - dynamic_models.yaml
+
 litellm_settings:
   additional_drop_params:
   - provider
@@ -25,7 +27,7 @@ litellm_settings:
 #  - postgres
 #  - prometheus
 model_list:
-# ── Core Model Entries ──
+# ── Local Models ──
 - litellm_params:
     api_base: http://100.80.59.45:8080/v1
     api_key: na
@@ -45,44 +47,32 @@ model_list:
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
-  model_name: auto
+  model_name: gemma-4-12b-gguf
 - litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    max_tokens: 8192
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    stop:
-    - <turn|>
-    - </s>
-    - <eos>
-    stream_timeout: 60
-    timeout: 60
-  model_info:
-    input_cost_per_token: 0.0
-    output_cost_per_token: 0.0
-  model_name: reasoning
-- litellm_params:
-    api_base: http://127.0.0.1:11434
+    api_base: http://host.docker.internal:11434
     max_retries: 0
     max_parallel_requests: 1
-    model: ollama/hermes:latest
-    timeout: 45
+    model: ollama_chat/hermes:latest
+    num_ctx: 32768
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+        preserve_thinking: false
+    stream_timeout: 300
+    timeout: 300
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
-  model_name: local
+  model_name: hermes-latest-proxy
+
+# ── Cloud Models ──
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
     model: gemini/gemini-3.6-flash
+    reasoning_effort: high
     timeout: 300
-  model_name: gemini-flash
+  model_name: gemini-3.6-flash
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
@@ -92,109 +82,11 @@ model_list:
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
-    model: gemini/gemini-2.5-pro
+    model: gemini/gemini-3.1-pro-preview
+    reasoning_effort: high
     timeout: 300
-  model_name: gemini-pro
+  model_name: gemini-3.1-pro
 
-# ── Intuitive Friendly Pseudo-Model Aliases ──
-- litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 45
-  model_name: frugal
-- litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 45
-  model_name: smart
-- litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    max_tokens: 8192
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 60
-  model_name: thinker
-- litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    max_tokens: 8192
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 60
-  model_name: reasoner
-- litellm_params:
-    api_base: http://127.0.0.1:11434
-    max_retries: 0
-    max_parallel_requests: 1
-    model: ollama/hermes:latest
-    timeout: 45
-  model_name: offline
-- litellm_params:
-    api_base: http://127.0.0.1:11434
-    max_retries: 0
-    max_parallel_requests: 1
-    model: ollama/hermes:latest
-    timeout: 45
-  model_name: private
-- litellm_params:
-    api_key: os.environ/GOOGLE_API_KEY
-    max_tokens: 8192
-    model: gemini/gemini-3.6-flash
-    timeout: 300
-  model_name: cloud
-- litellm_params:
-    api_key: os.environ/GOOGLE_API_KEY
-    max_tokens: 8192
-    model: gemini/gemini-3.5-flash-lite
-    timeout: 300
-  model_name: fast
-- litellm_params:
-    api_key: os.environ/GOOGLE_API_KEY
-    max_tokens: 8192
-    model: gemini/gemini-3.5-flash-lite
-    timeout: 300
-  model_name: lite
-- litellm_params:
-    api_base: http://100.80.59.45:8080/v1
-    api_key: na
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
-    max_retries: 2
-    max_parallel_requests: 1
-    model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
-    timeout: 45
-  model_name: free
-
-# ── Router Settings ──
-# IMPORTANT: All router_settings (including fallbacks) are defined in
-# dynamic_models.yaml, which is the single source of truth.
 # LiteLLM's include: mechanism OVERWRITES (not merges) router_settings,
 # so defining them here would be silently dropped when the dynamic
 # models file is loaded. See: 2026-07-22 thinker 503 incident.

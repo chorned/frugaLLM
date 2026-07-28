@@ -1,0 +1,78 @@
+--- frugallm/dynamic_roster_sidecar.py
++++ frugallm/dynamic_roster_sidecar.py
+@@ -178,14 +178,16 @@
+ 
+     # Generate Balanced Chain
+     yaml_lines.append("  # ── Balanced Chain ──")
++    balanced_names = []
+     for i, b_id in enumerate(balanced_ids):
+-        model_name = "free_balanced" if i == 0 else f"free_balanced_{i+1}"
++        model_name = _litellm_model(b_id)
++        balanced_names.append(model_name)
+         yaml_lines.extend([
+             f"  - model_name: {model_name}",
+             "    litellm_params:",
+             f"      model: {_litellm_model(b_id)}",
+             "      api_key: os.environ/OPENROUTER_API_KEY",
+             "      max_tokens: 8192",
+             "      timeout: 35",
+             "      max_retries: 0",
+             ""
+         ])
+-        if i < len(balanced_ids) - 1:
+-            next_model = f"free_balanced_{i+2}"
+-            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
+-        else:
+-            fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
++
++    for i, model_name in enumerate(balanced_names):
++        if i < len(balanced_names) - 1:
++            next_model = balanced_names[i+1]
++            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
++        else:
++            fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
+ 
+     yaml_lines.extend([
+         "  - model_name: free_balanced_backup",
+@@ -211,14 +213,16 @@
+ 
+     # Generate Reasoning Chain
+     yaml_lines.append("  # ── Reasoning Chain ──")
++    reasoning_names = []
+     for i, r_id in enumerate(reasoning_ids):
+-        model_name = "free_reasoning" if i == 0 else f"free_reasoning_{i+1}"
++        model_name = _litellm_model(r_id)
++        reasoning_names.append(model_name)
+         yaml_lines.extend([
+             f"  - model_name: {model_name}",
+             "    litellm_params:",
+             f"      model: {_litellm_model(r_id)}",
+             "      api_key: os.environ/OPENROUTER_API_KEY",
+             "      max_tokens: 8192",
+             "      timeout: 35",
+             "      max_retries: 0",
+             ""
+         ])
+-        if i < len(reasoning_ids) - 1:
+-            next_model = f"free_reasoning_{i+2}"
+-            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
+-        else:
+-            fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
++
++    for i, model_name in enumerate(reasoning_names):
++        if i < len(reasoning_names) - 1:
++            next_model = reasoning_names[i+1]
++            fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
++        else:
++            fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
+ 
+     yaml_lines.extend([
+         "  - model_name: free_reasoning_backup",
+@@ -244,6 +248,11 @@
+         "router_settings:",
++        "  model_group_alias:",
++        f"    free_balanced: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
++        f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
+         "  allowed_fails: 3",
+         "  num_retries: 2",
+         "  retry_after: 60",
