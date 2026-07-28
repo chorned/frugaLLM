@@ -337,13 +337,11 @@ async def proxy_models(request: Request):
 
     try:
         data = resp.json()
-        print(f"DEBUG: Before filter, len(data): {len(data.get('data', []))}")
         if "data" in data and isinstance(data["data"], list):
             data["data"] = [
                 m for m in data["data"]
-                if not str(m.get("id", "")).startswith("free_balanced") and not str(m.get("id", "")).startswith("free_reasoning")
+                if not str(m.get("id", "")).startswith("free_balanced") and not str(m.get("id", "")).startswith("free_reasoning") and not str(m.get("id", "")).startswith("openrouter/google/gemini-2.5-flash:free")
             ]
-        print(f"DEBUG: After filter, len(data): {len(data.get('data', []))}")
         return JSONResponse(content=data, status_code=200)
     except Exception:
         return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
