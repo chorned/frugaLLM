@@ -520,15 +520,13 @@ def test_write_dynamic_models(result: TestResult):
             if model_id not in content and f"openrouter/{model_id}" not in content:
                 issues.append(f"Missing balanced model ID: {model_id}")
 
-        # Verify the backup models use gemini-flash (not local)
-        if "gemini-3.6-flash" not in content and "gemini/gemini-3.6-flash" not in content:
-            issues.append("Backup models should use gemini/gemini-3.6-flash as terminal fallback")
+        # Verify the backup models use local model (gemma-4-12b-gguf)
+        if "gemma-4-12b-gguf" not in content:
+            issues.append("Backup models should use gemma-4-12b-gguf as terminal fallback")
         if "ollama/hermes" in content:
             issues.append("Backup models should NOT use ollama/hermes (old pattern)")
 
         # Verify fallback chain references
-        if '"auto"' not in content:
-            issues.append("Missing auto → free_balanced fallback")
         if '"reasoning"' not in content:
             issues.append("Missing reasoning → free_reasoning fallback")
 

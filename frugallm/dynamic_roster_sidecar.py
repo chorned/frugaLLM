@@ -258,7 +258,6 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
 
     # Add the expected structural fallbacks for aliases
-    fallbacks.append("    - {\"auto\": [\"free_balanced\"]}")
     fallbacks.append("    - {\"reasoning\": [\"free_reasoning\"]}")
 
 
