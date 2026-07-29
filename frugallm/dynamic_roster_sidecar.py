@@ -176,6 +176,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "      max_tokens: 8192",
             "      timeout: 35",
             "      max_retries: 0",
+            "    model_info:",
+            "      supports_function_calling: true",
+            "      mode: chat",
             ""
         ])
 
@@ -200,6 +203,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "      max_tokens: 8192",
             "      timeout: 35",
             "      max_retries: 0",
+            "    model_info:",
+            "      supports_function_calling: true",
+            "      mode: chat",
             ""
         ])
 
@@ -213,6 +219,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "      max_tokens: 8192",
         "      timeout: 35",
         "      max_retries: 0",
+        "    model_info:",
+        "      supports_function_calling: true",
+        "      mode: chat",
         ""
     ])
 
@@ -232,6 +241,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             "      max_tokens: 8192",
             "      timeout: 35",
             "      max_retries: 0",
+            "    model_info:",
+            "      supports_function_calling: true",
+            "      mode: chat",
             ""
         ])
 
