@@ -314,89 +314,57 @@ class HermesProxyHandler(CustomLogger):
     # harmless no-op (it only adds a prefix if one is missing).
     # ═══════════════════════════════════════════════════════════════════════════
 
-    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+    def _normalize_model_name(self, kwargs: dict) -> None:
         """
-        Fires after a successful LLM call, before Langfuse/Postgres callbacks log it.
-
-        Normalizes the model name in kwargs so that Langfuse always receives a
-        consistent, fully-prefixed model identifier. Without this, the same
-        OpenRouter model can appear as two separate entries in Langfuse dashboards.
-
-        The normalization logic:
-        1. Read the model name from kwargs["model"]
-        2. If it already has a known provider prefix → leave it alone
-        3. If it has NO prefix and we can detect it was an OpenRouter call
-           (via litellm_params or api_base) → prepend "openrouter/"
-        4. Write the normalized name back to kwargs["model"] so downstream
-           callbacks (Langfuse, Postgres, Prometheus) all see the same value
-
-        Args:
-            kwargs:       The full kwargs dict from the LiteLLM call, including
-                          "model", "litellm_params", "api_base", etc.
-            response_obj: The response object (unused here).
-            start_time:   Call start timestamp (unused here).
-            end_time:     Call end timestamp (unused here).
+        Normalizes the model name in kwargs so that Langfuse always receives the
+        actual model string used (not an alias), and ensures a consistent prefix.
         """
         try:
             model = kwargs.get("model", "")
-            original_model = model  # Preserve for logging comparison
+            original_model = model
 
-            # ── Step 1: Check if the model already has a provider prefix ─────
-            # If it already starts with "openrouter/" or any other known prefix,
-            # it's already correctly identified — no normalization needed.
-            if model.startswith(_OPENROUTER_PREFIX):
-                # Already correctly prefixed — nothing to do.
-                return
-
-            if model.startswith(_NON_OPENROUTER_PREFIXES):
-                # This is a non-OpenRouter model (ollama/, openai/, gemini/, etc.)
-                # — leave it alone, it's correctly identified.
-                return
-
-            # ── Step 2: Detect if this was an OpenRouter-routed call ──────────
-            # If the model has no prefix, we need to figure out whether it came
-            # from OpenRouter. We check two indicators:
-            #
-            #   a) litellm_params.model — the original model string from config,
-            #      which always has the "openrouter/" prefix for OR models.
-            #   b) litellm_params.api_base — if it points to openrouter.ai,
-            #      we know this is an OpenRouter call.
             litellm_params = kwargs.get("litellm_params", {})
             config_model = litellm_params.get("model", "")
-            api_base = litellm_params.get("api_base", "") or ""
 
+            # If litellm_params has a model, it is the ACTUAL underlying model used
+            # (e.g. 'openai//models/gemma-4-12b-it-Q5_K_M.gguf' instead of alias 'gemma-4-12b-gguf').
+            if config_model:
+                model = config_model
+
+            # Ensure OpenRouter models have the proper prefix so Langfuse
+            # doesn't create duplicate entries.
+            api_base = litellm_params.get("api_base", "") or ""
             is_openrouter = (
-                config_model.startswith(_OPENROUTER_PREFIX)
+                model.startswith(_OPENROUTER_PREFIX)
                 or "openrouter.ai" in api_base
             )
+            
+            if is_openrouter and not model.startswith(_OPENROUTER_PREFIX):
+                model = f"{_OPENROUTER_PREFIX}{model}"
 
-            if is_openrouter:
-                # ── Step 3: Normalize — prepend the missing prefix ────────────
-                # The model string was stripped by LiteLLM's internal retry/fallback
-                # logic. Restore the prefix so Langfuse sees a consistent name.
-                normalized = f"{_OPENROUTER_PREFIX}{model}"
-                kwargs["model"] = normalized
-
+            if model != original_model:
+                kwargs["model"] = model
                 log.info(
                     "🏷️ Normalized model name for Langfuse: '%s' → '%s'",
                     original_model,
-                    normalized,
-                )
-            else:
-                # Not an OpenRouter model and no known prefix — this is likely
-                # a local model or custom endpoint. Log at debug level only.
-                log.debug(
-                    "🏷️ Model '%s' has no provider prefix but is not OpenRouter — leaving as-is",
                     model,
                 )
 
         except Exception as e:
             # SAFETY: Never let logging normalization break the callback chain.
-            # If this fails, Langfuse still logs — just potentially with the
-            # wrong model name (the pre-existing bug behavior).
-            log.warning(
-                "⚠️ Model name normalization failed (non-fatal): %s", e
-            )
+            log.warning("⚠️ Model name normalization failed (non-fatal): %s", e)
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        """
+        Fires after a successful LLM call, before Langfuse/Postgres callbacks log it.
+        """
+        self._normalize_model_name(kwargs)
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        """
+        Fires after a failed LLM call, before Langfuse/Postgres callbacks log it.
+        """
+        self._normalize_model_name(kwargs)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HOOK 4: FALLBACK SUCCESS — macOS notification on fallback routing

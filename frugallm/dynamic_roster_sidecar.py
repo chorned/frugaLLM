@@ -135,9 +135,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     missing because they were defined in litellm_config.yaml and overwritten by
     this file's router_settings.
     """
-    # Cap fallback chain length (default max 2 dynamic hops before gemini-flash)
+    # Cap fallback chain length (default max 100 dynamic hops before gemini-flash)
     # to prevent context loss and repetition across multiple disparate models.
-    max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "2"))
+    max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "100"))
     balanced_ids = balanced_ids[:max_chain_len]
     reasoning_ids = reasoning_ids[:max_chain_len]
 
@@ -159,22 +159,6 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     # These MUST live here (not in litellm_config.yaml) because LiteLLM's
     # include: mechanism overwrites router_settings rather than merging them.
     fallbacks = [
-        "    # ── Pseudo-Model Alias Fallbacks ──",
-        '    - {"frugal": ["free_balanced", "gemini-flash"]}',
-        '    - {"smart": ["free_balanced", "gemini-flash"]}',
-        '    - {"thinker": ["free_reasoning", "gemini-flash"]}',
-        '    - {"reasoner": ["free_reasoning", "gemini-flash"]}',
-        '    - {"offline": ["free_balanced", "gemini-flash"]}',
-        '    - {"private": ["free_balanced", "gemini-flash"]}',
-        '    - {"cloud": ["gemini-flash"]}',
-        '    - {"fast": ["gemini-flash-lite"]}',
-        '    - {"lite": ["gemini-flash-lite"]}',
-        '    - {"free": ["free_balanced", "gemini-flash"]}',
-        '    - {"frugallm": ["free_strict_balanced", "gemma-4-12b-gguf"]}',
-        "    # ── Core Model Fallbacks ──",
-        '    - {"auto": ["free_balanced", "gemini-flash"]}',
-        '    - {"reasoning": ["free_reasoning", "gemini-flash"]}',
-        '    - {"local": ["free_balanced", "gemini-flash"]}',
         "    # ── Dynamic Free Model Chains (generated) ──",
     ]
 
@@ -202,7 +186,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             fallbacks.append(f"    - {{\"{model_name}_strict\": [\"{next_model}_strict\"]}}")
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
-            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"free_balanced_backup\"]}}")
 
     # Generate Strict Free Models
     yaml_lines.append("  # ── Strict Free Chain (No Paid Fallback) ──")
@@ -232,16 +216,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         ""
     ])
 
-    yaml_lines.extend([
-        "  - model_name: free_balanced_backup",
-        "    litellm_params:",
-        "      model: gemini/gemini-3.6-flash",
-        "      api_key: os.environ/GOOGLE_API_KEY",
-        "      max_tokens: 8192",
-        "      timeout: 120",
-        "      max_retries: 0",
-        ""
-    ])
+
 
     # Generate Reasoning Chain
     yaml_lines.append("  # ── Reasoning Chain ──")
@@ -267,41 +242,38 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
 
-    yaml_lines.extend([
-        "  - model_name: free_reasoning_backup",
-        "    litellm_params:",
-        "      model: gemini/gemini-3.6-flash",
-        "      api_key: os.environ/GOOGLE_API_KEY",
-        "      max_tokens: 8192",
-        "      timeout: 120",
-        "      max_retries: 0",
-        ""
-    ])
+    # Add the expected structural fallbacks for aliases
+    fallbacks.append("    - {\"auto\": [\"free_balanced\"]}")
+    fallbacks.append("    - {\"reasoning\": [\"free_reasoning\"]}")
+
+
 
     # ── Full router_settings block ──
     # This is the SINGLE SOURCE OF TRUTH for all router settings.
     yaml_lines.extend([
         "router_settings:",
         "  model_group_alias:",
-        f"    free_balanced: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
+        f"    free_balanced: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
         f"    free_strict_balanced: {balanced_names[0] + '_strict' if balanced_names else 'gemma-4-12b-gguf'}",
         f"    frugallm: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
-        f"    auto: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    local: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    reasoning: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
-        f"    frugal: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    smart: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    thinker: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
-        f"    reasoner: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
-        f"    offline: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    private: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
-        f"    free: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
+        f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
+        f"    auto: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    local: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    reasoning: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    frugal: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    smart: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    thinker: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    reasoner: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    offline: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    private: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
+        f"    free: {{reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}}",
         f"    cloud: gemini-3.6-flash",
         f"    fast: gemini-flash-lite",
         f"    lite: gemini-flash-lite",
         f"    gemini-flash: gemini-3.6-flash",
         f"    gemini-pro: gemini-3.1-pro",
+        f"    free_balanced_backup: gemini-3.6-flash",
+        f"    free_reasoning_backup: gemini-3.6-flash",
         "  allowed_fails: 3",
         "  num_retries: 2",
         "  retry_after: 60",
@@ -459,8 +431,18 @@ def discover_and_register():
             except (ValueError, TypeError):
                 continue
 
-        # Sort all free models by created to find the newest ones
-        free.sort(key=lambda x: x.get("created", 0), reverse=True)
+        # Sort all free models by a ranked composite score:
+        # 1. More supported parameters (e.g. tools, reasoning, response_format)
+        # 2. Most recently created
+        # 3. Larger output context (max_completion_tokens)
+        free.sort(
+            key=lambda x: (
+                len(x.get("supported_parameters", [])),
+                x.get("created", 0),
+                (x.get("top_provider") or {}).get("max_completion_tokens") or 0
+            ),
+            reverse=True
+        )
 
         if free:
             # We filter for 256k+ context for both balanced and reasoning pools
