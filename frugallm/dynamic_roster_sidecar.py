@@ -135,10 +135,10 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     missing because they were defined in litellm_config.yaml and overwritten by
     this file's router_settings.
     """
-    # Cap fallback chain length (default max 100 dynamic hops before fallback)
-    # to ensure we exhaust all available models before falling back to local/paid models,
-    # prioritizing availability over minimizing latency/context loss.
-    max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "100"))
+    # Cap fallback chain length (default max 4 dynamic hops before fallback)
+    # to ensure we don't hit LiteLLM's max_fallbacks limit (typically 5),
+    # allowing us to reach the local/paid fallback model.
+    max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "4"))
     balanced_ids = balanced_ids[:max_chain_len]
     reasoning_ids = reasoning_ids[:max_chain_len]
 
@@ -189,8 +189,8 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
             fallbacks.append(f"    - {{\"{model_name}_strict\": [\"{next_model}_strict\"]}}")
         else:
-            fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
-            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"free_balanced_backup\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}\": [\"gemma-4-12b-gguf\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
 
     # Generate Strict Free Models
     yaml_lines.append("  # ── Strict Free Chain (No Paid Fallback) ──")
@@ -254,15 +254,16 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
             fallbacks.append(f"    - {{\"{model_name}_strict\": [\"{next_model}_strict\"]}}")
         else:
-            fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}\": [\"gemma-4-12b-gguf\"]}}")
             fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
 
     # Add the expected structural fallbacks for aliases
-    fallbacks.append("    - {\"reasoning\": [\"free_reasoning\"]}")
     if len(reasoning_names) > 1:
         fallbacks.append(f"    - {{\"frugallm\": [\"{reasoning_names[1]}\"]}}")
+        fallbacks.append(f"    - {{\"reasoning\": [\"{reasoning_names[1]}\"]}}")
     else:
-        fallbacks.append(f"    - {{\"frugallm\": [\"free_reasoning_backup\"]}}")
+        fallbacks.append(f"    - {{\"frugallm\": [\"gemma-4-12b-gguf\"]}}")
+        fallbacks.append(f"    - {{\"reasoning\": [\"gemma-4-12b-gguf\"]}}")
 
 
 
