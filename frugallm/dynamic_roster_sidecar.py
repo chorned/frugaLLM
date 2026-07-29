@@ -259,6 +259,10 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
 
     # Add the expected structural fallbacks for aliases
     fallbacks.append("    - {\"reasoning\": [\"free_reasoning\"]}")
+    if len(reasoning_names) > 1:
+        fallbacks.append(f"    - {{\"frugallm\": [\"{reasoning_names[1]}\"]}}")
+    else:
+        fallbacks.append(f"    - {{\"frugallm\": [\"free_reasoning_backup\"]}}")
 
 
 
