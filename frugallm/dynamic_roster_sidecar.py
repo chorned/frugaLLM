@@ -135,8 +135,9 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
     missing because they were defined in litellm_config.yaml and overwritten by
     this file's router_settings.
     """
-    # Cap fallback chain length (default max 100 dynamic hops before gemini-flash)
-    # to prevent context loss and repetition across multiple disparate models.
+    # Cap fallback chain length (default max 100 dynamic hops before fallback)
+    # to ensure we exhaust all available models before falling back to local/paid models,
+    # prioritizing availability over minimizing latency/context loss.
     max_chain_len = int(os.getenv("MAX_DYNAMIC_CHAIN_LEN", "100"))
     balanced_ids = balanced_ids[:max_chain_len]
     reasoning_ids = reasoning_ids[:max_chain_len]
@@ -251,8 +252,10 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         if i < len(reasoning_names) - 1:
             next_model = reasoning_names[i+1]
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"{next_model}_strict\"]}}")
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_reasoning_backup\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
 
     # Add the expected structural fallbacks for aliases
     fallbacks.append("    - {\"auto\": [\"free_balanced\"]}")
@@ -269,23 +272,23 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         f"    free_strict_balanced: {balanced_names[0] + '_strict' if balanced_names else 'gemma-4-12b-gguf'}",
         f"    frugallm: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
         f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    auto: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    local: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
+        f"    auto: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
+        f"    local: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
         f"    reasoning: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    frugal: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    smart: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
+        f"    frugal: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
+        f"    smart: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
         f"    thinker: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
         f"    reasoner: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    offline: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    private: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
-        f"    free: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
+        f"    offline: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
+        f"    private: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
+        f"    free: {balanced_names[0] if balanced_names else 'gemma-4-12b-gguf'}",
         f"    cloud: gemini-3.6-flash",
         f"    fast: gemini-flash-lite",
         f"    lite: gemini-flash-lite",
         f"    gemini-flash: gemini-3.6-flash",
         f"    gemini-pro: gemini-3.1-pro",
-        f"    free_balanced_backup: gemini-3.6-flash",
-        f"    free_reasoning_backup: gemini-3.6-flash",
+        f"    free_balanced_backup: gemma-4-12b-gguf",
+        f"    free_reasoning_backup: gemma-4-12b-gguf",
         "  allowed_fails: 3",
         "  num_retries: 2",
         "  retry_after: 60",
