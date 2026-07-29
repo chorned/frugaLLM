@@ -1,0 +1,2 @@
+test:
+  command: "python3 -m pytest tests/ -v"
