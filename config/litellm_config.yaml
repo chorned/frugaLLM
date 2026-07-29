@@ -7,6 +7,7 @@ include:
 - dynamic_models.yaml
 
 litellm_settings:
+  request_timeout: 1800
   additional_drop_params:
   - provider
   cache: true
@@ -35,15 +36,15 @@ model_list:
       chat_template_kwargs:
         enable_thinking: true
         preserve_thinking: true
-    max_retries: 2
+    max_retries: 0
     max_parallel_requests: 1
     model: openai//models/gemma-4-12b-it-Q5_K_M.gguf
     stop:
     - <turn|>
     - </s>
     - <eos>
-    stream_timeout: 45
-    timeout: 45
+    stream_timeout: 1800
+    timeout: 1800
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
@@ -58,8 +59,8 @@ model_list:
       chat_template_kwargs:
         enable_thinking: false
         preserve_thinking: false
-    stream_timeout: 300
-    timeout: 300
+    stream_timeout: 600
+    timeout: 600
   model_info:
     input_cost_per_token: 0.0
     output_cost_per_token: 0.0
@@ -71,20 +72,20 @@ model_list:
     max_tokens: 8192
     model: gemini/gemini-3.6-flash
     reasoning_effort: high
-    timeout: 300
+    timeout: 600
   model_name: gemini-3.6-flash
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
     model: gemini/gemini-3.5-flash-lite
-    timeout: 300
+    timeout: 600
   model_name: gemini-flash-lite
 - litellm_params:
     api_key: os.environ/GOOGLE_API_KEY
     max_tokens: 8192
     model: gemini/gemini-3.1-pro-preview
     reasoning_effort: high
-    timeout: 300
+    timeout: 600
   model_name: gemini-3.1-pro
 
 # LiteLLM's include: mechanism OVERWRITES (not merges) router_settings,

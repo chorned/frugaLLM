@@ -170,6 +170,7 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         '    - {"fast": ["gemini-flash-lite"]}',
         '    - {"lite": ["gemini-flash-lite"]}',
         '    - {"free": ["free_balanced", "gemini-flash"]}',
+        '    - {"frugallm": ["free_strict_balanced", "gemma-4-12b-gguf"]}',
         "    # ── Core Model Fallbacks ──",
         '    - {"auto": ["free_balanced", "gemini-flash"]}',
         '    - {"reasoning": ["free_reasoning", "gemini-flash"]}',
@@ -198,8 +199,38 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         if i < len(balanced_names) - 1:
             next_model = balanced_names[i+1]
             fallbacks.append(f"    - {{\"{model_name}\": [\"{next_model}\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"{next_model}_strict\"]}}")
         else:
             fallbacks.append(f"    - {{\"{model_name}\": [\"free_balanced_backup\"]}}")
+            fallbacks.append(f"    - {{\"{model_name}_strict\": [\"gemma-4-12b-gguf\"]}}")
+
+    # Generate Strict Free Models
+    yaml_lines.append("  # ── Strict Free Chain (No Paid Fallback) ──")
+    for i, b_id in enumerate(balanced_ids):
+        model_name = _litellm_model(b_id) + "_strict"
+        yaml_lines.extend([
+            f"  - model_name: {model_name}",
+            "    litellm_params:",
+            f"      model: {_litellm_model(b_id)}",
+            "      api_key: os.environ/OPENROUTER_API_KEY",
+            "      max_tokens: 8192",
+            "      timeout: 35",
+            "      max_retries: 0",
+            ""
+        ])
+
+    # Alias exposed for Opencode discovery
+    frugal_start_model = _litellm_model(reasoning_ids[0]) if reasoning_ids else "gemma-4-12b-gguf"
+    yaml_lines.extend([
+        "  - model_name: frugallm",
+        "    litellm_params:",
+        f"      model: {frugal_start_model}",
+        "      api_key: os.environ/OPENROUTER_API_KEY",
+        "      max_tokens: 8192",
+        "      timeout: 35",
+        "      max_retries: 0",
+        ""
+    ])
 
     yaml_lines.extend([
         "  - model_name: free_balanced_backup",
@@ -253,13 +284,15 @@ def _write_dynamic_models(balanced_ids: list[str], reasoning_ids: list[str]) -> 
         "router_settings:",
         "  model_group_alias:",
         f"    free_balanced: {balanced_names[0] if balanced_names else 'free_balanced_backup'}",
+        f"    free_strict_balanced: {balanced_names[0] + '_strict' if balanced_names else 'gemma-4-12b-gguf'}",
+        f"    frugallm: {reasoning_names[0] if reasoning_names else 'gemma-4-12b-gguf'}",
         f"    free_reasoning: {reasoning_names[0] if reasoning_names else 'free_reasoning_backup'}",
         "  allowed_fails: 3",
         "  num_retries: 2",
         "  retry_after: 60",
         "  routing_strategy: simple-shuffle",
-        "  stream_timeout: 300",
-        "  timeout: 300",
+        "  stream_timeout: 1800",
+        "  timeout: 1800",
         "  fallbacks:"
     ])
     yaml_lines.extend(fallbacks)

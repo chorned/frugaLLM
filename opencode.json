@@ -1,11 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["opencode-plugin-litellm@latest"],
+  "model": "litellm/frugallm",
   "provider": {
     "litellm": {
       "options": {
         "baseURL": "http://127.0.0.1:5050/v1",
-        "apiKey": "sk-sidecar-1"
+        "apiKey": "sk-sidecar-1",
+        "timeout": 1800000,
+        "chunkTimeout": 1800000,
+        "streamTimeout": 1800000
       }
     }
   }

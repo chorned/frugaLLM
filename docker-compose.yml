@@ -25,17 +25,13 @@ services:
     environment:
       - LITELLM_URL=http://litellm:4000
       - CLASSIFIER_URL=http://classifier:8000
-      - GATEKEEPER_TIMEOUT=180
+      - GATEKEEPER_TIMEOUT=1800
       - GATEKEEPER_MAX_RETRIES=3
     command: >
-      uvicorn app:app
-      --host 0.0.0.0
-      --port 5050
-      --workers 1
-      --log-level info
+      uvicorn app:app --host 0.0.0.0 --port 5050 --workers 1 --log-level info
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5050/health"]
+      test: [ "CMD", "curl", "-sf", "http://localhost:5050/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -68,12 +64,10 @@ services:
       # Disable the in-process Gatekeeper middleware to avoid double-validation
       - GATEKEEPER_ENABLED=false
     command: >
-      --config /app/config/litellm_config.yaml
-      --port 4000
-      --num_workers 1
+      --config /app/config/litellm_config.yaml --port 4000 --num_workers 1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; req=urllib.request.Request('http://127.0.0.1:4000/health/readiness', headers={'Authorization': 'Bearer sk-sidecar-1'}); urllib.request.urlopen(req)\" || exit 1"]
+      test: [ "CMD-SHELL", "python3 -c \"import urllib.request; req=urllib.request.Request('http://127.0.0.1:4000/health/readiness', headers={'Authorization': 'Bearer sk-sidecar-1'}); urllib.request.urlopen(req)\" || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -95,11 +89,11 @@ services:
     # No ports exposed to host — internal only
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-sf", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s  # Model loading can take time on first boot
+      start_period: 60s # Model loading can take time on first boot
     networks:
       - frugallm-net
 
@@ -140,7 +134,7 @@ services:
       - litellm_db_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      test: [ "CMD-SHELL", "pg_isready -U litellm" ]
       interval: 10s
       timeout: 5s
       retries: 5

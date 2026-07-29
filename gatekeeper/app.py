@@ -65,7 +65,7 @@ CLASSIFIER_URL = os.getenv("CLASSIFIER_URL", "http://classifier:8000")
 # Gatekeeper timeout MUST provide headroom for local model (45-60s) +
 # OpenRouter fallback chain (35s steps). Setting to 180s (3 minutes) guarantees
 # zero false-positive 504 timeouts while bailing fast on hung calls.
-REQUEST_TIMEOUT = float(os.getenv("GATEKEEPER_TIMEOUT", "180"))
+REQUEST_TIMEOUT = float(os.getenv("GATEKEEPER_TIMEOUT", "600"))
 MAX_RETRIES = int(os.getenv("GATEKEEPER_MAX_RETRIES", "3"))
 
 REPRIMAND_MESSAGE = (
