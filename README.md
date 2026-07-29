@@ -23,7 +23,7 @@ FrugaLLM is a containerized, OpenAI-compatible AI gateway stack that **routes yo
 - 🆓 **Zero-Cost Inference** — Automatically discovers and rotates through free models on OpenRouter
 - 🛡️ **ONNX Micro-Classifier & Gatekeeper** — Uses a zero-shot NLI neural classifier (`cross-encoder/nli-deberta-v3-small`) and an autonomous reverse-proxy Gatekeeper to catch and auto-retry "empty promise" hallucinations
 - 🔄 **Self-Healing Fallback Chains** — If a free model rate-limits or fails, the next one picks up instantly
-- ⚡ **Paid Gemini 3.6 Flash Safety Net** — All chains ultimately terminate at paid Gemini 3.6 Flash so requests never fail
+- ⚡ **Local Gemma 4 12B Safety Net** — All chains ultimately terminate at local `gemma-4-12b-gguf` so requests never fail
 - 🤖 **Intuitive Pseudo-Model Aliases** — Simple model names (`frugal`, `thinker`, `cloud`, `offline`, `fast`) that make sense to humans and AI agents
 - 🔒 **Anti-Hijack Middleware** — Defeats upstream persona injection from free-tier model providers
 - 📊 **100% Langfuse Telemetry** — Full request/response logging, cost tracking, trace context, and model name normalization
@@ -55,7 +55,7 @@ flowchart TB
 
     subgraph Backends["Model Backends"]
         OR["OpenRouter (Free Models)"]
-        GEM["Google Gemini 3.6 Flash (Paid Fallback)"]
+        GEM["Local Gemma 4 12B (Terminal Fallback)"]
         OL["Ollama (Local CPU)"]
     end
 
@@ -79,8 +79,8 @@ FrugaLLM provides clean, descriptive model aliases designed for AI agents and de
 
 | Pseudo-Model Alias | Legacy Alias | Routing & Fallback Flow | Primary Use Case |
 | :--- | :--- | :--- | :--- |
-| **`frugal`** / **`smart`** | `auto` | Local Gemma 4 12B → OpenRouter Free → Paid Gemini 3.6 Flash | General tasks, coding, Q&A (default) |
-| **`thinker`** / **`reasoner`** | `reasoning` | Local Gemma 4 12B (CoT) → Free Reasoning → Paid Gemini 3.6 Flash | Deep architecture, math, multi-step planning |
+| **`frugal`** / **`smart`** | `auto` | Local Gemma 4 12B → OpenRouter Free → Local Gemma 4 12B | General tasks, coding, Q&A (default) |
+| **`thinker`** / **`reasoner`** | `reasoning` | Local Gemma 4 12B (CoT) → Free Reasoning → Local Gemma 4 12B | Deep architecture, math, multi-step planning |
 | **`offline`** / **`private`** | `local` | Ollama `hermes:latest` (100% local CPU) | Sensitive data, offline execution |
 | **`free`** | `free_balanced` | Top OpenRouter free model (dynamic 5-min pool) | Zero-cost cloud execution |
 | **`cloud`** | `gemini-flash` | Paid Gemini 3.6 Flash ($1.50 / $7.50 per 1M) | Guaranteed uptime, 1M context |

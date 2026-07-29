@@ -366,7 +366,7 @@ def test_dynamic_model(result: TestResult, model: str, timeout: float = 60.0):
 
     if ok:
         result.pass_(summary, detail)
-    elif "backup" in model:
+    elif "gemma-4-12b-gguf" == model:
         # Backup models are local — failures are real failures
         result.fail(summary, detail)
     else:
@@ -398,7 +398,7 @@ def test_fallback_chain_integrity(result: TestResult, parsed: dict):
         while current in fallbacks and current not in visited:
             visited.add(current)
             current = fallbacks[current]
-        if "backup" not in current:
+        if "gemma-4-12b-gguf" not in current:
             issues.append(f"Balanced chain does not terminate at backup (ends at {current})")
 
     # Check reasoning chain terminates at backup
@@ -408,7 +408,7 @@ def test_fallback_chain_integrity(result: TestResult, parsed: dict):
         while current in fallbacks and current not in visited:
             visited.add(current)
             current = fallbacks[current]
-        if "backup" not in current:
+        if "gemma-4-12b-gguf" not in current:
             issues.append(f"Reasoning chain does not terminate at backup (ends at {current})")
 
 
@@ -510,10 +510,6 @@ def test_write_dynamic_models(result: TestResult):
             issues.append("Missing free_balanced model")
         if "free_reasoning" not in content:
             issues.append("Missing free_reasoning model")
-        if "free_balanced_backup" not in content:
-            issues.append("Missing free_balanced_backup fallback")
-        if "free_reasoning_backup" not in content:
-            issues.append("Missing free_reasoning_backup fallback")
 
         # Verify the correct model IDs are present
         for model_id in test_balanced:
@@ -970,12 +966,8 @@ Examples:
             test_candidates = []
             if parsed["balanced_models"]:
                 test_candidates.append(parsed["balanced_models"][0])   # free_balanced
-                if "free_balanced_backup" in parsed["balanced_models"]:
-                    test_candidates.append("free_balanced_backup")
             if parsed["reasoning_models"]:
                 test_candidates.append(parsed["reasoning_models"][0])  # free_reasoning
-                if "free_reasoning_backup" in parsed["reasoning_models"]:
-                    test_candidates.append("free_reasoning_backup")
 
             # Deduplicate while preserving order
             seen = set()

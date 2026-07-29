@@ -1,2 +1,2 @@
 test:
-  command: "python3 -m pytest tests/ -v"
+  command: "make test-suite"

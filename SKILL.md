@@ -18,7 +18,7 @@ version: 3.0.0
 
 # FrugaLLM 3.0 — Gateway Management Skill
 
-This skill covers the operation, troubleshooting, testing, and maintenance of the FrugaLLM 3.0 Gateway Stack — a self-healing LLM proxy stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification, paid Gemini 3.6 Flash terminal fallback, 100% Langfuse telemetry tracking, and intuitive pseudo-model aliases for agents and users.
+This skill covers the operation, troubleshooting, testing, and maintenance of the FrugaLLM 3.0 Gateway Stack — a self-healing LLM proxy stack that automatically discovers and routes through free models on OpenRouter, with zero-shot neural empty-promise classification, local Gemma 4 12B terminal fallback, 100% Langfuse telemetry tracking, and intuitive pseudo-model aliases for agents and users.
 
 ---
 
@@ -44,7 +44,7 @@ Clients (Hermes / Apps)
    │
    ├─► OpenRouter Free Roster (Balanced / Reasoning)
    ├─► Local Gemma / Ollama
-   └─► Paid Gemini Fleet Terminal Fallback (Gemini 3.6 Flash)
+   └─► Local Terminal Fallback (Gemma 4 12B)
 ```
 
 ---
@@ -57,8 +57,8 @@ Main API Base URL: `http://localhost:5050/v1`
 
 | Intuitive Alias | Legacy Alias | Routing Strategy / Fallback Chain | Primary Use Case |
 |---|---|---|---|
-| **`frugal`** / **`smart`** | `auto` | Local Gemma 4 12B → OpenRouter Free → Paid Gemini 3.6 Flash | General tasks, coding, Q&A (default) |
-| **`thinker`** / **`reasoner`** | `reasoning` | Local Gemma 4 12B (CoT) → Free Reasoning → Paid Gemini 3.6 Flash | Complex architecture, math, multi-step planning |
+| **`frugal`** / **`smart`** | `auto` | Local Gemma 4 12B → OpenRouter Free → Local Gemma 4 12B | General tasks, coding, Q&A (default) |
+| **`thinker`** / **`reasoner`** | `reasoning` | Local Gemma 4 12B (CoT) → Free Reasoning → Local Gemma 4 12B | Complex architecture, math, multi-step planning |
 | **`offline`** / **`private`** | `local` | Ollama `hermes:latest` (100% local CPU) | Sensitive data, offline work |
 | **`free`** | `free_balanced` | Top OpenRouter free model (dynamic 5-min pool) | Zero-cost cloud execution |
 | **`cloud`** | `gemini-flash` | Paid Gemini 3.6 Flash ($1.50 / $7.50 per 1M) | Guaranteed uptime, large context |
@@ -67,7 +67,7 @@ Main API Base URL: `http://localhost:5050/v1`
 
 > **Backwards Compatibility**: All legacy aliases (`auto`, `reasoning`, `local`, `gemini-flash`, `gemini-pro`) remain 100% supported.
 >
-> **Best Practice for Stateful / Multi-turn Sessions**: Dynamic free models (`frugal`, `free`) cap dynamic fallback chains to 2 hops before dropping to `gemini-flash`. For long-running, multi-file agentic tasks with complex tool calling, use **`cloud`** (`gemini-flash`) or **`thinker`** to avoid context shifts across different model providers mid-session.
+> **Best Practice for Stateful / Multi-turn Sessions**: Dynamic free models (`frugal`, `free`) cap dynamic fallback chains to 4 hops before dropping to `gemma-4-12b-gguf`. For long-running, multi-file agentic tasks with complex tool calling, use **`cloud`** (`gemini-flash`) or **`thinker`** to avoid context shifts across different model providers mid-session.
 
 ---
 
