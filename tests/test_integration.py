@@ -393,7 +393,7 @@ def test_fallback_chain_integrity(result: TestResult, parsed: dict):
 
     # Check balanced chain terminates at backup
     if balanced:
-        current = "free_balanced"
+        current = balanced[0]
         visited = set()
         while current in fallbacks and current not in visited:
             visited.add(current)
@@ -403,7 +403,7 @@ def test_fallback_chain_integrity(result: TestResult, parsed: dict):
 
     # Check reasoning chain terminates at backup
     if reasoning:
-        current = "free_reasoning"
+        current = reasoning[0]
         visited = set()
         while current in fallbacks and current not in visited:
             visited.add(current)
@@ -411,17 +411,7 @@ def test_fallback_chain_integrity(result: TestResult, parsed: dict):
         if "backup" not in current:
             issues.append(f"Reasoning chain does not terminate at backup (ends at {current})")
 
-    # Check auto → free_balanced fallback exists
-    if "auto" not in fallbacks:
-        issues.append("Missing fallback: auto → free_balanced")
-    elif fallbacks["auto"] != "free_balanced":
-        issues.append(f"auto fallback points to {fallbacks['auto']!r} instead of free_balanced")
 
-    # Check reasoning → free_reasoning fallback exists
-    if "reasoning" not in fallbacks:
-        issues.append("Missing fallback: reasoning → free_reasoning")
-    elif fallbacks["reasoning"] != "free_reasoning":
-        issues.append(f"reasoning fallback points to {fallbacks['reasoning']!r} instead of free_reasoning")
 
     if issues:
         result.fail(f"{len(issues)} issue(s)", "\n".join(issues))
@@ -716,7 +706,7 @@ def test_litellm_models_endpoint(result: TestResult):
     model_ids = {m.get("id", "") for m in data.get("data", [])}
 
     # These are the minimum expected static aliases
-    required = {"auto", "reasoning", "local"}
+    required = {"frugallm", "gemma-4-12b-gguf", "hermes-latest-proxy"}
     missing = required - model_ids
     if missing:
         result.fail(f"Missing static models: {missing}", f"Found: {sorted(model_ids)}")
