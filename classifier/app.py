@@ -34,6 +34,9 @@ log = logging.getLogger("frugallm-classifier")
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 MODEL_ID = "cross-encoder/nli-deberta-v3-small"
+# The /app/model directory must contain the exported ONNX model files:
+# (e.g. model.onnx, config.json, tokenizer.json, tokenizer_config.json, vocab.txt).
+# These should be exported using `optimum-cli` prior to building the Docker image.
 MODEL_DIR = "/app/model"  # Pre-exported ONNX model baked in at Docker build time
 CANDIDATE_LABELS = [
     "promising to execute a technical action or delegate a task",

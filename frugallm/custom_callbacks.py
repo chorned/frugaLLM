@@ -619,15 +619,7 @@ class HermesProxyHandler(CustomLogger):
                     type(dropped).__name__,
                 )
         
-        # DEBUG: dump data to file (safeguarded for read-only container filesystems)
-        try:
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, "debug_data.json")
-            with open(log_path, "a") as f:
-                f.write(json.dumps(data, default=str) + "\n")
-        except Exception as e:
-            log.debug("Debug file write skipped: %s", e)
+
 
 
 

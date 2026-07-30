@@ -198,8 +198,10 @@ def main():
 
     # ── Map CLI arguments to the gateway's model aliases ──
     target_model = "thinker"  # Default execution uses thinker
-    if args.profile in ("engineer", "documenter", "devops"):
-        target_model = "free"
+    if args.profile in ("engineer", "documenter"):
+        target_model = "reasoning"
+    elif args.profile == "devops":
+        target_model = "auto"
     if args.thinker:
         target_model = "thinker"
     if args.local or args.offline:

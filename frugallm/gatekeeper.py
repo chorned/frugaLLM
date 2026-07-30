@@ -119,55 +119,12 @@ class ToolCallValidator:
         Extracts JSON from raw text (markdown fences, balanced braces)
         and verifies it parses without error.
 
-    Tier 1.5 — Heuristic Intent Detection ("Empty Promises"):
-        When no JSON is found, scans the raw text for high-confidence
-        action intents (sequential markers + execution verbs). Catches
-        models that describe what they will do instead of doing it.
-
     Tier 2 — Schema/Tool Validation:
         Checks that the tool name exists in the registry and that the
         arguments satisfy the JSON Schema from the tools payload.
     """
 
-    # ── Tier 1.5: Compiled Regex Patterns ─────────────────────────────────
-    # Dual-gate: requires BOTH an intent/sequential marker AND an execution
-    # verb in the same phrase to avoid false positives on benign text.
 
-    _INTENT_MARKERS = re.compile(
-        r"(?:"
-        r"I(?:'ll| will| am going to| shall)"
-        r"|[Ll]et me"
-        r"|[Ff]irst(?:,?\s*I(?:'ll| will))?"
-        r"|[Tt]hen(?:,?\s*I(?:'ll| will))?"
-        r"|[Nn]ext(?:,?\s*(?:I(?:'ll| will)|[Ll]et me))?"
-        r"|[Nn]ow(?:,?\s*I(?:'ll| will))?"
-        r")"
-        r"\s+"
-        r"(?:"
-        r"creat|run|execut|query|call|invok|fetch|updat|delet"
-        r"|restart|deploy|check|search|send|post|submit|generat"
-        r"|build|process|launch|trigger|schedul|dispatch|perform"
-        r")\w*",
-        re.IGNORECASE,
-    )
-
-    _ACTION_GERUNDS = re.compile(
-        r"(?:"
-        r"creating|running|executing|querying|calling|invoking|fetching"
-        r"|updating|deleting|restarting|deploying|checking|searching|sending"
-        r"|posting|submitting|generating|building|processing|launching"
-        r"|triggering|scheduling|dispatching|performing"
-        r")"
-        r"\s+(?:the\s+|a\s+|an\s+)?"
-        r"\w+",
-        re.IGNORECASE,
-    )
-
-    _EMPTY_PROMISE_REPRIMAND = (
-        "CRITICAL VALIDATION ERROR: You stated intent to perform an action but did not "
-        "execute the required tool call. Stop conversational prose. "
-        "Output ONLY the JSON block immediately."
-    )
 
     def __init__(self, tools: list):
         self.tool_registry: dict[str, dict] = {}
@@ -254,17 +211,9 @@ class ToolCallValidator:
     ) -> tuple[bool, str | None, dict | None]:
         """Extract JSON from text content, validate, and construct response."""
 
-        # ── Tier 1.5: Heuristic Intent Detection ─────────────────────
-        # Evaluate heuristic BEFORE structural JSON validation.
-        # Do not short-circuit just because a stray { is found.
-        is_promise, reprimand = self._detect_empty_promise(content)
-
         # Tier 1: Syntax — extract JSON
         extracted = self._extract_json(content)
         if extracted is None:
-            if is_promise:
-                return False, reprimand, None
-
             # Generic Tier 1 syntax failure
             return (
                 False,
@@ -278,8 +227,6 @@ class ToolCallValidator:
         try:
             parsed = json.loads(extracted)
         except json.JSONDecodeError as e:
-            if is_promise:
-                return False, reprimand, None
             return (
                 False,
                 f"[SYSTEM ERROR: Validation failed. Extracted text is not valid "
@@ -290,8 +237,6 @@ class ToolCallValidator:
         # Normalize to {name, arguments}
         tool_call_data = self._normalize_tool_call(parsed)
         if tool_call_data is None:
-            if is_promise:
-                return False, reprimand, None
             return (
                 False,
                 "[SYSTEM ERROR: Validation failed. JSON does not contain a "
@@ -381,46 +326,7 @@ class ToolCallValidator:
             
         return None
 
-    # ── Tier 1.5: Heuristic Intent Detection ──────────────────────────────
 
-    def _detect_empty_promise(self, content: str) -> tuple[bool, str | None]:
-        """
-        Tier 1.5: Scan text for high-confidence action intents without tool calls.
-
-        Uses a multi-gate approach:
-            Gate 1 — Explicit programmatic tool names (e.g., `skill_view`, "skill_view")
-            Gate 2 — Intent markers with execution verbs (e.g., "I will create", "Let me run")
-            Gate 3 — Action gerunds in operational context (e.g., "creating ticket", "running script")
-
-        Returns:
-            (is_empty_promise, reprimand_or_none)
-        """
-        stripped = content.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
-            return False, None
-
-        reprimand = self._EMPTY_PROMISE_REPRIMAND
-        if self.tool_registry:
-            avail_tools = ", ".join(f"'{t}'" for t in list(self.tool_registry.keys())[:5])
-            reprimand = (
-                f"{self._EMPTY_PROMISE_REPRIMAND} Available tools: [{avail_tools}]. "
-                "Do not state intent in text — output the structured tool call immediately."
-            )
-
-        # Gate 1: Check for explicit programmatic tool names mentioned in prose.
-        # We match names enclosed in backticks or quotes.
-        if self.tool_registry:
-            names = "|".join(re.escape(name) for name in self.tool_registry.keys())
-            # Match `tool_name` or "tool_name" or 'tool_name'
-            tool_name_pattern = re.compile(rf"([`'\"])({names})\1", re.IGNORECASE)
-            if tool_name_pattern.search(content):
-                return True, reprimand
-
-        # Gates 2 & 3: Broad sequential verbs & gerunds
-        if self._INTENT_MARKERS.search(content) or self._ACTION_GERUNDS.search(content):
-            return True, reprimand
-
-        return False, None
 
     # ── Normalization ─────────────────────────────────────────────────────
 
