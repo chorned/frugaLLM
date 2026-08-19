@@ -107,7 +107,7 @@ nano .env
 ### 2. Launch the Stack
 
 ```bash
-# Build and start all containers (Gatekeeper, LiteLLM, Classifier, Sidecar, DB)
+# Build and start all containers (Gatekeeper, LiteLLM, Classifier, Sidecar, Postgres)
 docker compose up -d
 
 # Watch container startup and logs
@@ -165,6 +165,9 @@ python -m frugallm.router_cli --cloud "Analyze this document"
 
 # Inspect gateway health & active model roster
 python -m frugallm.router_cli --models
+
+# View dynamic model roster from LiteLLM proxy directly
+curl -X GET "http://localhost:4000/v1/models" -H "Authorization: Bearer sk-sidecar-1"
 ```
 
 ---
@@ -210,8 +213,7 @@ frugaLLM/
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── config/                   # Centralized configuration
-│   ├── litellm_config.yaml   # Proxy routing, aliases & fallback chains
-│   └── dynamic_models.yaml   # Auto-generated free model roster
+│   └── litellm_config.yaml   # Proxy routing, aliases & fallback chains
 ├── frugallm/                 # Core Python modules & custom callbacks
 │   ├── custom_callbacks.py   # Anti-hijack, thought sigs, Langfuse normalizer
 │   ├── dynamic_roster_sidecar.py # Free model scanner

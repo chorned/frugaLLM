@@ -38,8 +38,9 @@ docker compose logs -f classifier
 
 **Fix:**
 ```bash
-# Verify POSTGRES_PASSWORD is set in .env
-grep POSTGRES_PASSWORD .env
+# Verify POSTGRES credentials are set in .env and the frugallm-postgres container is healthy
+docker compose ps postgres
+grep POSTGRES_ .env
 ```
 
 ---
@@ -71,9 +72,9 @@ grep POSTGRES_PASSWORD .env
    docker compose logs -f sidecar
    ```
 2. Verify `OPENROUTER_API_KEY` is set in `.env`.
-3. Verify `dynamic_models.yaml` is present in `config/`:
+3. Check if the model roster is populating in the database:
    ```bash
-   cat config/dynamic_models.yaml
+   curl -X GET "http://localhost:4000/v1/models" -H "Authorization: Bearer sk-sidecar-1"
    ```
 
 ---
@@ -90,8 +91,8 @@ curl -X POST http://localhost:5050/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Quick check"}]}'
 
-# View dynamic model roster
-cat config/dynamic_models.yaml
+# View dynamic model roster from LiteLLM proxy
+curl -X GET "http://localhost:4000/v1/models" -H "Authorization: Bearer sk-sidecar-1"
 
 # Tail container logs
 docker compose logs -f

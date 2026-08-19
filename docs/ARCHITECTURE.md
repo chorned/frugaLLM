@@ -28,7 +28,7 @@ FrugaLLM 3.0 is a **containerized, microservice-based AI gateway stack** that si
 │  - Dynamic Free Roster       │  │  - CPU ONNX Runtime          │
 │  - Fallback Chains           │  │  - DeBERTa-v3 NLI Neural Model│
 │  - Custom Callbacks          │  │  - Zero-shot Intent Detection│
-│  - Response Cache & DB Logging│ │                              │
+│  - Postgres DB Config & Logs │  │                              │
 └──────────────┬───────────────┘  └──────────────────────────────┘
                │
                ▼
@@ -71,10 +71,10 @@ FrugaLLM 3.0 is a **containerized, microservice-based AI gateway stack** that si
 - Zero-shot natural language inference for semantic empty-promise detection with sub-millisecond CPU latency.
 
 ### ⚡ LiteLLM Router (`config/litellm_config.yaml`)
-- Internal model router on port `4000`.
-- Manages free model selection, fallbacks, and PostgreSQL spend logging.
+- Internal model router on port `4000` (also exposed on host for Admin API).
+- Manages free model selection, fallbacks, and connects to a PostgreSQL database for router state and spend logging.
 
 ### 🔄 Dynamic Roster Sidecar (`frugallm/dynamic_roster_sidecar.py`)
 - Background container scanning OpenRouter every 5 minutes.
-- Auto-updates `config/dynamic_models.yaml` with the latest free model roster.
+- Auto-updates the LiteLLM PostgreSQL database with the latest free model roster via the Admin API.
 

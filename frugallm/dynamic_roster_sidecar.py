@@ -193,7 +193,12 @@ def _push_models_to_db(balanced_ids: list[str], reasoning_ids: list[str]) -> boo
     for alias in ["frugallm", "free_reasoning", "reasoning", "thinker", "reasoner"]:
         groups.append((alias, reasoning_primary, reasoning_fallbacks))
 
-
+    # 4. Add cloud aliases
+    groups.append(("cloud", "gemini/gemini-3.6-flash", []))
+    groups.append(("fast", "gemini/gemini-3.5-flash-lite", []))
+    groups.append(("lite", "gemini/gemini-3.5-flash-lite", []))
+    groups.append(("gemini-pro", "gemini/gemini-3.1-pro-preview", []))
+    groups.append(("pro", "gemini/gemini-3.1-pro-preview", []))
 
     proxy_port = os.getenv("FRUGALLM_PROXY_PORT", "5050")
     proxy_host = os.getenv("FRUGALLM_PROXY_HOST", "127.0.0.1")

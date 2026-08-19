@@ -6,7 +6,6 @@
 |------|---------|-----------------|
 | `docker-compose.yml` | Container stack definition | No — edit freely |
 | `config/litellm_config.yaml` | Main LiteLLM proxy configuration | No — edit freely |
-| `config/dynamic_models.yaml` | Dynamic model roster from OpenRouter | Yes — by sidecar |
 | `.env` | API keys and runtime configuration | No — edit freely |
 
 ---
@@ -18,7 +17,10 @@
 | Variable | Description |
 |----------|-------------|
 | `OPENROUTER_API_KEY` | OpenRouter API key for model inference. Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `POSTGRES_PASSWORD` | PostgreSQL database password for spend logging |
+| `POSTGRES_USER` | PostgreSQL database user for LiteLLM DB |
+| `POSTGRES_PASSWORD` | PostgreSQL database password for LiteLLM DB |
+| `POSTGRES_DB` | PostgreSQL database name |
+| `DATABASE_URL` | PostgreSQL connection string for internal routing and spend logging |
 
 ---
 
@@ -51,5 +53,4 @@
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key for tracing |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key |
 | `LANGFUSE_HOST` | Langfuse host URL (e.g., `https://us.cloud.langfuse.com`) |
-| `DATABASE_URL` | PostgreSQL connection string for spend logging |
 

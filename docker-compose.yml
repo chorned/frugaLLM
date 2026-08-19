@@ -106,7 +106,7 @@ services:
     container_name: frugallm-sidecar
     volumes:
       - ./config:/app/config
-      #- ./frugallm:/app/frugallm:ro
+      - ./frugallm:/app/frugallm:ro
     env_file:
       - .env
     environment:
