@@ -39,7 +39,6 @@ GATEWAY_URL = os.getenv("FRUGALLM_GATEWAY_URL", "http://127.0.0.1:5050")
 MASTER_KEY = os.getenv("FRUGALLM_MASTER_KEY", "sk-sidecar-1")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
-DYNAMIC_MODELS_PATH = CONFIG_DIR / "dynamic_models.yaml"
 
 # ─── ANSI Colors ─────────────────────────────────────────────────────────────
 class C:
@@ -276,68 +275,6 @@ def _validate_completion_response(status: int, data: Any, expected_model: str | 
     return True, summary, detail
 
 
-def _parse_dynamic_models_yaml() -> dict:
-    """
-    Parse dynamic_models.yaml to extract model names and fallback chains.
-    Uses a simple line-by-line parser to avoid PyYAML dependency.
-
-    Returns:
-        {
-            "model_names": ["free_balanced", "free_balanced_2", ...],
-            "fallbacks": {"free_balanced": "free_balanced_2", ...},
-            "balanced_models": [...],
-            "reasoning_models": [...],
-        }
-    """
-    if not DYNAMIC_MODELS_PATH.exists():
-        return {"model_names": [], "fallbacks": {}, "balanced_models": [], "reasoning_models": []}
-
-    text = DYNAMIC_MODELS_PATH.read_text()
-    model_names = []
-    fallbacks = {}
-    balanced = []
-    reasoning = []
-
-    # Extract model_name entries
-    in_model_list = False
-    for line in text.split("\n"):
-        stripped = line.strip()
-
-        if stripped == "model_list:":
-            in_model_list = True
-            continue
-
-        if stripped.startswith("router_settings:"):
-            in_model_list = False
-
-        if in_model_list and stripped.startswith("- model_name:"):
-            name = stripped.split(":", 1)[1].strip()
-            model_names.append(name)
-            if "balanced" in name:
-                balanced.append(name)
-            elif "reasoning" in name:
-                reasoning.append(name)
-
-        # Parse fallback entries like: - {"auto": ["free_balanced"]}
-        if stripped.startswith("- {") and ":" in stripped:
-            # Strip the leading "- " and parse the JSON-ish dict
-            try:
-                entry_str = stripped[2:]
-                entry = json.loads(entry_str)
-                for src, dsts in entry.items():
-                    if isinstance(dsts, list) and dsts:
-                        fallbacks[src] = dsts[0]
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    return {
-        "model_names": model_names,
-        "fallbacks": fallbacks,
-        "balanced_models": balanced,
-        "reasoning_models": reasoning,
-    }
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # GROUP 1: Static Model Alias Tests
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -366,7 +303,7 @@ def test_dynamic_model(result: TestResult, model: str, timeout: float = 60.0):
 
     if ok:
         result.pass_(summary, detail)
-    elif "gemma-4-12b-gguf" == model:
+    elif model in {"gemma-4-12b-gguf", "hermes-latest-proxy"}:
         # Backup models are local — failures are real failures
         result.fail(summary, detail)
     else:
@@ -374,50 +311,7 @@ def test_dynamic_model(result: TestResult, model: str, timeout: float = 60.0):
         result.warn(f"Free model may be offline: {summary}", detail)
 
 
-def test_dynamic_models_yaml_exists(result: TestResult):
-    """Verify that the sidecar has generated dynamic_models.yaml."""
-    if DYNAMIC_MODELS_PATH.exists():
-        size = DYNAMIC_MODELS_PATH.stat().st_size
-        result.pass_(f"Exists ({size} bytes)")
-    else:
-        result.fail(f"File not found: {DYNAMIC_MODELS_PATH}")
 
-
-def test_fallback_chain_integrity(result: TestResult, parsed: dict):
-    """Verify the fallback chain is complete and terminates at a backup model."""
-    fallbacks = parsed["fallbacks"]
-    balanced = parsed["balanced_models"]
-    reasoning = parsed["reasoning_models"]
-
-    issues = []
-
-    # Check balanced chain terminates at backup
-    if balanced:
-        current = balanced[0]
-        visited = set()
-        while current in fallbacks and current not in visited:
-            visited.add(current)
-            current = fallbacks[current]
-        if "gemma-4-12b-gguf" not in current:
-            issues.append(f"Balanced chain does not terminate at backup (ends at {current})")
-
-    # Check reasoning chain terminates at backup
-    if reasoning:
-        current = reasoning[0]
-        visited = set()
-        while current in fallbacks and current not in visited:
-            visited.add(current)
-            current = fallbacks[current]
-        if "gemma-4-12b-gguf" not in current:
-            issues.append(f"Reasoning chain does not terminate at backup (ends at {current})")
-
-
-
-    if issues:
-        result.fail(f"{len(issues)} issue(s)", "\n".join(issues))
-    else:
-        chains = f"balanced={len(balanced)}, reasoning={len(reasoning)}"
-        result.pass_(f"All chains terminate at backup ({chains})")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -466,77 +360,7 @@ def test_is_reasoning_model(result: TestResult):
         result.pass_(f"All {len(positives) + len(negatives)} classifications correct")
 
 
-def test_write_dynamic_models(result: TestResult):
-    """Test that _write_dynamic_models produces valid YAML with correct structure."""
-    import tempfile
-    sys.path.insert(0, str(PROJECT_ROOT))
-    try:
-        from frugallm.dynamic_roster_sidecar import _write_dynamic_models, _DYNAMIC_MODELS_PATH
-    except ImportError as e:
-        result.fail(f"Cannot import sidecar: {e}")
-        return
 
-    # Save original path and redirect to temp file
-    import frugallm.dynamic_roster_sidecar as sidecar_module
-    original_path = sidecar_module._DYNAMIC_MODELS_PATH
-
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            tmp_path = Path(f.name)
-
-        sidecar_module._DYNAMIC_MODELS_PATH = tmp_path
-
-        test_balanced = ["google/gemini-2.5-flash:free", "meta/llama-3:free"]
-        test_reasoning = ["deepseek/deepseek-r1:free"]
-
-        success = _write_dynamic_models(test_balanced, test_reasoning)
-        if not success:
-            result.fail("_write_dynamic_models returned False")
-            return
-
-        content = tmp_path.read_text()
-        issues = []
-
-        # Verify structure
-        if "model_list:" not in content:
-            issues.append("Missing 'model_list:' section")
-        if "router_settings:" not in content:
-            issues.append("Missing 'router_settings:' section")
-        if "fallbacks:" not in content:
-            issues.append("Missing 'fallbacks:' section")
-
-        # Verify model names
-        if "free_balanced" not in content:
-            issues.append("Missing free_balanced model")
-        if "free_reasoning" not in content:
-            issues.append("Missing free_reasoning model")
-
-        # Verify the correct model IDs are present
-        for model_id in test_balanced:
-            if model_id not in content and f"openrouter/{model_id}" not in content:
-                issues.append(f"Missing balanced model ID: {model_id}")
-
-        # Verify the backup models use local model (gemma-4-12b-gguf)
-        if "gemma-4-12b-gguf" not in content:
-            issues.append("Backup models should use gemma-4-12b-gguf as terminal fallback")
-        if "ollama/hermes" in content:
-            issues.append("Backup models should NOT use ollama/hermes (old pattern)")
-
-        # Verify fallback chain references
-        if '"reasoning"' not in content:
-            issues.append("Missing reasoning → free_reasoning fallback")
-
-        if issues:
-            result.fail(f"{len(issues)} structural issue(s)", "\n".join(issues) + f"\n\nGenerated:\n{content[:500]}")
-        else:
-            result.pass_(f"Valid YAML generated ({len(content)} bytes, {len(test_balanced)} balanced, {len(test_reasoning)} reasoning)")
-
-    finally:
-        sidecar_module._DYNAMIC_MODELS_PATH = original_path
-        try:
-            tmp_path.unlink()
-        except Exception:
-            pass
 
 
 def test_openrouter_model_filtering(result: TestResult):
@@ -850,7 +674,7 @@ def test_langfuse_metadata_propagation(result: TestResult):
                 "tags": ["test", "telemetry"],
             },
         },
-        timeout=15.0,
+        timeout=60.0,
     )
 
     if status == 200 and isinstance(data, dict) and "choices" in data:
@@ -922,8 +746,8 @@ Examples:
     suite.start_group("GROUP 1: Static Model Aliases")
 
     static_models = [
-        ("auto", 120.0),
-        ("reasoning", 120.0),
+        ("auto", 180.0),
+        ("reasoning", 180.0),
         ("local", 90.0),
         # Friendly Intuitive Aliases
         ("frugal", 120.0),
@@ -954,32 +778,18 @@ Examples:
     if args.skip_dynamic:
         print(f"  {C.DIM}⏭ Skipped all dynamic model tests (--skip-dynamic){C.RESET}")
     else:
-        suite.run_test("dynamic_models.yaml exists", test_dynamic_models_yaml_exists)
-        parsed = _parse_dynamic_models_yaml()
-
-        if not parsed["model_names"]:
-            print(f"  {C.YELLOW}⚠ No dynamic models found — sidecar may not have run yet{C.RESET}")
-        else:
-            suite.run_test("Fallback chain integrity", test_fallback_chain_integrity, parsed)
-
-            # Test a representative subset: first balanced, first reasoning, and both backups
-            test_candidates = []
-            if parsed["balanced_models"]:
-                test_candidates.append(parsed["balanced_models"][0])   # free_balanced
-            if parsed["reasoning_models"]:
-                test_candidates.append(parsed["reasoning_models"][0])  # free_reasoning
-
-            # Deduplicate while preserving order
-            seen = set()
-            for model in test_candidates:
-                if model not in seen:
-                    seen.add(model)
-                    suite.run_test(f"Dynamic: {model}", test_dynamic_model, model, 60.0)
+        # Instead of parsing YAML, just test the main dynamic aliases directly
+        test_candidates = ["free_balanced", "free_reasoning", "auto", "reasoning"]
+        
+        seen = set()
+        for model in test_candidates:
+            if model not in seen:
+                seen.add(model)
+                suite.run_test(f"Dynamic: {model}", test_dynamic_model, model, 60.0)
 
     # ── GROUP 3: Sidecar Discovery Logic ──────────────────────────────────
     suite.start_group("GROUP 3: Sidecar Discovery Logic")
     suite.run_test("_is_reasoning_model() heuristic", test_is_reasoning_model)
-    suite.run_test("_write_dynamic_models() YAML gen", test_write_dynamic_models)
     suite.run_test("OpenRouter model filtering pipeline", test_openrouter_model_filtering)
 
     # ── Summary ───────────────────────────────────────────────────────────

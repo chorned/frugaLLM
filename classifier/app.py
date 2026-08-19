@@ -40,6 +40,7 @@ MODEL_ID = "cross-encoder/nli-deberta-v3-small"
 MODEL_DIR = "/app/model"  # Pre-exported ONNX model baked in at Docker build time
 CANDIDATE_LABELS = [
     "promising to execute a technical action or delegate a task",
+    "explaining code, mechanics, or a previous response without taking action",
     "general conversational response",
 ]
 CONFIDENCE_THRESHOLD = 0.85

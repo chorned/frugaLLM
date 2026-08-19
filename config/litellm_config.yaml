@@ -3,8 +3,7 @@ general_settings:
   allow_client_side_credentials: true
   master_key: sk-sidecar-1
 
-include:
-- dynamic_models.yaml
+
 
 litellm_settings:
   request_timeout: 1800
@@ -16,17 +15,11 @@ litellm_settings:
     type: local
   callbacks: frugallm.custom_callbacks.hermes_proxy_handler
   drop_params: true
-  failure_callback:
-  - langfuse
-#  - postgres
-#  - prometheus
+  failure_callback: []
   middleware:
   - frugallm.gatekeeper.GatekeeperMiddleware
   set_verbose: true
-  success_callback:
-  - langfuse
-#  - postgres
-#  - prometheus
+  success_callback: []
 model_list:
 # ── Local Models ──
 - litellm_params:

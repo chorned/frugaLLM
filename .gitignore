@@ -46,3 +46,9 @@ __MACOSX/
 
 # FrugaLLM specific
 config/dynamic_models.yaml
+
+# Ad-hoc debugging artifacts
+test_timeout.py
+poll_litellm.sh
+poll_litellm2.sh
+models2.json

@@ -48,9 +48,10 @@ services:
   # Model routing backend. Not exposed to host — only reachable via the
   # Gatekeeper on the internal network.
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm-database:latest
     container_name: frugallm-litellm
-    # No ports exposed to host — internal only
+    ports:
+      - "4000:4000"
     volumes:
       - ./config:/app/config:ro
       - ./frugallm:/app/frugallm:ro
@@ -59,10 +60,10 @@ services:
     environment:
       - LITELLM_CONFIG_FILE=/app/config/litellm_config.yaml
       - LITELLM_LOG=DEBUG
-      # Override DATABASE_URL to use internal Docker hostname instead of 127.0.0.1
       - DATABASE_URL=postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-litellm}
       # Disable the in-process Gatekeeper middleware to avoid double-validation
       - GATEKEEPER_ENABLED=false
+      - STORE_MODEL_IN_DB=True
     command: >
       --config /app/config/litellm_config.yaml --port 4000 --num_workers 1
     restart: unless-stopped
@@ -71,7 +72,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 600s
     depends_on:
       db:
         condition: service_healthy
@@ -105,7 +106,7 @@ services:
     container_name: frugallm-sidecar
     volumes:
       - ./config:/app/config
-      - ./frugallm:/app/frugallm:ro
+      #- ./frugallm:/app/frugallm:ro
     env_file:
       - .env
     environment:

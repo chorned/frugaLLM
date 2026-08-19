@@ -130,24 +130,67 @@ app = FastAPI(
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
 @app.get("/health")
-async def health():
-    """Gatekeeper health — also checks upstream service connectivity."""
-    status = {"gatekeeper": "ready", "litellm": "unknown", "classifier": "unknown"}
+async def health(request: Request):
+    """
+    Gatekeeper health — checks upstream readiness and provides a model roster.
+
+    Uses LiteLLM's fast /health/readiness probe for status, and /v1/models to
+    build the healthy_endpoints / unhealthy_endpoints lists the CLI expects.
+
+    The full LiteLLM /health endpoint is avoided because it health-checks
+    every model endpoint sequentially, which takes 60–120+ seconds.
+
+    The caller's Authorization header is forwarded to LiteLLM so that
+    authenticated requests receive the full model roster.
+    """
+    # Start with Gatekeeper's own fields
+    merged: dict = {"gatekeeper": "ready", "litellm": "unknown", "classifier": "unknown"}
+
+    # ── LiteLLM readiness (fast, ~50ms) ───────────────────────────────────
+    fwd_headers = {}
+    auth = request.headers.get("authorization")
+    if auth:
+        fwd_headers["authorization"] = auth
 
     try:
-        resp = await _litellm_client.get("/health/readiness", timeout=5.0)
-        status["litellm"] = "healthy" if resp.status_code == 200 else f"error:{resp.status_code}"
+        readiness_resp = await _litellm_client.get("/health/readiness", timeout=5.0)
+        if readiness_resp.status_code == 200:
+            merged["litellm"] = "healthy"
+            readiness_data = readiness_resp.json()
+            if "status" in readiness_data:
+                merged["status"] = readiness_data["status"]
+        else:
+            merged["litellm"] = f"error:{readiness_resp.status_code}"
     except Exception as e:
-        status["litellm"] = f"unreachable: {type(e).__name__}"
+        merged["litellm"] = f"unreachable: {type(e).__name__}"
 
+    # ── Model roster (from /v1/models, fast) ──────────────────────────────
+    # Build healthy_endpoints list from the model roster so the CLI's
+    # --models flag works. This is much faster than the full /health probe.
+    try:
+        models_resp = await _litellm_client.get("/v1/models", headers=fwd_headers, timeout=10.0)
+        if models_resp.status_code == 200:
+            models_data = models_resp.json()
+            model_list = models_data.get("data", [])
+            merged["healthy_endpoints"] = [
+                {"model": m.get("id", "unknown")} for m in model_list
+            ]
+            merged["unhealthy_endpoints"] = []
+            merged["healthy_count"] = len(model_list)
+            merged["unhealthy_count"] = 0
+    except Exception:
+        # Model roster is optional — don't fail the health check for it
+        pass
+
+    # ── Classifier health ─────────────────────────────────────────────────
     try:
         resp = await _classifier_client.get("/health", timeout=5.0)
-        status["classifier"] = "healthy" if resp.status_code == 200 else f"error:{resp.status_code}"
+        merged["classifier"] = "healthy" if resp.status_code == 200 else f"error:{resp.status_code}"
     except Exception as e:
-        status["classifier"] = f"unreachable: {type(e).__name__}"
+        merged["classifier"] = f"unreachable: {type(e).__name__}"
 
-    healthy = status["litellm"] == "healthy" and status["classifier"] == "healthy"
-    return JSONResponse(content=status, status_code=200 if healthy else 503)
+    healthy = merged["litellm"] == "healthy" and merged["classifier"] == "healthy"
+    return JSONResponse(content=merged, status_code=200 if healthy else 503)
 
 
 # ─── Chat Completion Interceptor ─────────────────────────────────────────────
@@ -163,6 +206,11 @@ async def intercept_chat_completion(request: Request):
     try:
         req_json = json.loads(body_bytes)
     except json.JSONDecodeError:
+        return await _proxy_raw(request, body_bytes)
+
+    # Guard: if the payload is valid JSON but not a dict (e.g. a JSON array),
+    # proxy it through unchanged — calling .get() on a list would crash.
+    if not isinstance(req_json, dict):
         return await _proxy_raw(request, body_bytes)
 
     # ── 2. Handle streaming — force stream=False for validation ───────────
@@ -320,7 +368,12 @@ async def proxy_models(request: Request):
     """
     headers = _build_forward_headers(request)
     try:
-        resp = await _litellm_client.get(request.url.path, headers=headers, timeout=10.0)
+        resp = await _litellm_client.get(
+            request.url.path,
+            headers=headers,
+            params=dict(request.query_params),
+            timeout=10.0,
+        )
     except httpx.TimeoutException:
         return JSONResponse(
             content={"error": {"message": "Upstream timeout", "type": "timeout"}},
